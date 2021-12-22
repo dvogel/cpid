@@ -1,0 +1,15 @@
+[package]
+name = "cpid"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.51"
+serde = "1.0.117"
+serde_derive = "1.0.117"
+serde_json = "1.0.72"
+sled = "0.34.7"
+xdg = "2.4.0"
+zip = "0.5.13"
