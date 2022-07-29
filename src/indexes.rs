@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 
 use std::collections::HashMap;
+use std::convert::identity;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -12,30 +13,80 @@ use zip::result::ZipResult;
 
 extern crate sled;
 
-pub fn enumerate_indexes(db: &sled::Db, index_name: &str) -> Result<()> {
-    let class_packages_tree = db.open_tree(index_name).expect("database tree");
+const class_packages_tree_suffix: &str = "-class_pkgs";
+const package_contents_tree_suffix: &str = "-pkg_classes";
 
+fn tree_name(index_name: &str, suffix: &str) -> String {
+    return format!("{}{}", index_name, suffix);
+}
+
+fn open_class_packages_tree(db: &sled::Db, index_name: &str) -> sled::Tree {
+    return db
+        .open_tree(tree_name(index_name, class_packages_tree_suffix))
+        .expect("database tree");
+}
+
+fn open_package_contents_tree(db: &sled::Db, index_name: &str) -> sled::Tree {
+    return db
+        .open_tree(tree_name(index_name, package_contents_tree_suffix))
+        .expect("database tree");
+}
+
+pub fn enumerate_indexes(db: &sled::Db, index_name: &str) -> Result<()> {
+    let class_packages_tree = open_class_packages_tree(db, index_name);
+
+    println!("IDX: {} (class -> packages)", index_name);
     for next_result in class_packages_tree.iter() {
         match next_result {
             Ok((kbytes, vbytes)) => {
-                match std::str::from_utf8(&kbytes) {
-                    Ok(kstr) => { println!("CLASS: {}", kstr); },
-                    Err(e) => { eprintln!("ERROR: {}", e); }
-                }
-            },
-            Err(e) => { eprintln!("ERROR: {}", e); }
+                String::from_utf8(Vec::from(kbytes.as_ref()))
+                    .map(|class_name| println!("CLASS: {}", class_name))
+                    .map_err(|e| eprintln!("ERROR: {}", e));
+            }
+            Err(e) => {
+                eprintln!("ERROR: {}", e);
+            }
+        }
+    }
+
+    let package_contents_tree = open_package_contents_tree(db, index_name);
+    println!("IDX: {} (package -> classes)", index_name);
+    for next_result in package_contents_tree.iter() {
+        match next_result {
+            Ok((kbytes, vbytes)) => {
+                String::from_utf8(Vec::from(kbytes.as_ref()))
+                    .map(|package_name| println!("PACKAGE: {}", package_name))
+                    .map_err(|e| eprintln!("ERROR: {}", e));
+            }
+            Err(e) => {
+                eprintln!("ERROR: {}", e);
+            }
         }
     }
 
     Ok(())
 }
 
-pub fn index_class_tuples(tree: &sled::Tree, tuples: &[(String, String, String)]) -> Result<(), String> {
+pub fn index_class_tuples(
+    class_packages_tree: &sled::Tree,
+    package_contents_tree: &sled::Tree,
+    tuples: &[(String, String, String)],
+) -> Result<(), String> {
     for (class_name, package_name, zip_path) in tuples {
-        tree.update_and_fetch(class_name, |bytes: Option<&[u8]>| {
-            merge_package_into_list(package_name, bytes)
-        }).map_err(|e| e.to_string())?;
+        println!("({}, {})", class_name, package_name);
+        class_packages_tree
+            .update_and_fetch(class_name, |bytes: Option<&[u8]>| {
+                merge_string_into_list(package_name, bytes)
+            })
+            .map_err(|e| e.to_string())?;
+
+        package_contents_tree
+            .update_and_fetch(package_name, |bytes: Option<&[u8]>| {
+                merge_string_into_list(class_name, bytes)
+            })
+            .map_err(|e| e.to_string())?;
     }
+
     Ok(())
 }
 
@@ -49,15 +100,18 @@ pub fn index_zip_archive(path: &Path) -> Result<Vec<(String, String, String)>> {
             if let Some(stub) = filename.strip_suffix(".class") {
                 let mut parts = stub.split('/').collect::<Vec<&str>>();
                 match parts.len() {
-                    0..=1 => eprintln!("Skipping because it lack enough path components: '{}'", filename),
+                    0..=1 => eprintln!(
+                        "Skipping because it lack enough path components: '{}'",
+                        filename
+                    ),
                     _ => {
                         if let Some(class_name) = parts.pop() {
                             let package_name = parts.join(".");
                             accum.push((
-                                    class_name.to_string(),
-                                    package_name.to_string(),
-                                    filename.to_string(),
-                                    ));
+                                class_name.to_string(),
+                                package_name.to_string(),
+                                filename.to_string(),
+                            ));
                         }
                     }
                 }
@@ -67,30 +121,27 @@ pub fn index_zip_archive(path: &Path) -> Result<Vec<(String, String, String)>> {
     Ok(accum)
 }
 
-pub fn merge_package_into_list(package_name: &str, old_bytes: Option<&[u8]>) -> Option<Vec<u8>> {
-    let mut packages: Vec<String> = match old_bytes {
-        None => Vec::new(),
-        Some(b) => {
-            match serde_json::from_slice(b) {
-                Err(_) => Vec::new(),
-                Ok(entries) => entries,
-            }
-        }
-    };
-    packages.push(package_name.to_string());
-    packages.sort();
-    packages.dedup();
-    match serde_json::to_string(&packages) {
-        Ok(b) => Some(b.into_bytes()),
-        Err(_) => {
-            eprintln!("WTF?");
-            None
-        }
-    }
+pub fn merge_string_into_list(new_entry: &str, old_bytes: Option<&[u8]>) -> Option<Vec<u8>> {
+    let mut list: Vec<String> = old_bytes
+        .and_then(|b| serde_json::from_slice(b).ok())
+        .unwrap_or_else(|| Vec::new());
+
+    list.push(new_entry.to_string());
+    list.sort();
+    list.dedup();
+
+    serde_json::to_string(&list)
+        .map(|b| b.into_bytes())
+        .map_err(|e| eprintln!("WTF?! {}", e))
+        .ok()
 }
 
-pub fn query_class_index(db: &sled::Db, index_name: &str, class_name: &str) -> Result<HashMap<String, Vec<String>>> {
-    let class_packages_tree = db.open_tree(index_name).expect("database tree");
+pub fn query_class_index(
+    db: &sled::Db,
+    index_name: &str,
+    class_name: &str,
+) -> Result<HashMap<String, Vec<String>>> {
+    let class_packages_tree = open_class_packages_tree(db, index_name);
     let maybe_val = class_packages_tree.get(class_name)?;
     let mut results: HashMap<String, Vec<String>> = HashMap::new();
     match maybe_val {
@@ -103,41 +154,56 @@ pub fn query_class_index(db: &sled::Db, index_name: &str, class_name: &str) -> R
 }
 
 pub fn reindex_jar_dir(db: &sled::Db, index_name: &str, indexed_dir_path: &Path) -> Result<()> {
-    let class_packages_tree = db.open_tree(index_name).expect("database tree");
+    let class_packages_tree = open_class_packages_tree(db, index_name);
+    let package_contents_tree = open_package_contents_tree(db, index_name);
     walk_file_tree(indexed_dir_path, &|entry: &fs::DirEntry| {
         if let Some(entry_path) = entry.path().as_path().to_str() {
             if entry_path.ends_with(".jar") {
-                match index_zip_archive(entry.path().as_path()).map_err(|e| e.to_string()) {
-                    Ok(tuples) => match index_class_tuples(&class_packages_tree, &tuples) {
-                        Ok(()) => {
-                            class_packages_tree.flush().unwrap();
-                        },
-                        Err(e) => {
-                            eprintln!("Error: Could not store index entries for archive: {}: {}", entry_path, e);
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!("Error: Could not read archive: {}: {}", entry_path, e);
-                    }
-                }
+                index_zip_archive(entry.path().as_path())
+                    .map(|tuples| {
+                        index_class_tuples(&class_packages_tree, &package_contents_tree, &tuples)
+                    })
+                    .map(|_| {
+                        class_packages_tree
+                            .flush()
+                            .and(package_contents_tree.flush())
+                    })
+                    .map_err(|e| {
+                        eprintln!(
+                            "Error: Could not store index entries for archive: {}: {}",
+                            entry_path, e
+                        );
+                    });
             }
         }
-    }).expect("Directory scanning.");
+    })
+    .expect("Directory scanning.");
     class_packages_tree.flush()?;
     Ok(())
 }
 
 pub fn reindex_classpath(db: &sled::Db, index_name: &str, class_path: &str) -> Result<()> {
-    let class_packages_tree = db.open_tree(index_name).expect("database tree");
+    let class_packages_tree = open_class_packages_tree(db, index_name);
+    let package_contents_tree = open_package_contents_tree(db, index_name);
     for jar_path_name in class_path.split(':') {
-        if jar_path_name.ends_with(".jar")  {
-            match index_zip_archive(Path::new(jar_path_name)) {
-                Ok(tuples) => match index_class_tuples(&class_packages_tree, &tuples) {
-                    Ok(()) => { class_packages_tree.flush().unwrap(); },
-                    Err(e) => eprintln!("Error: Could not store index entries for archive: {}: {}", jar_path_name, e),
-                },
-                Err(e) => eprintln!("Error: Could not store index entries for archive: {}: {}", jar_path_name, e),
-            }
+        if jar_path_name.ends_with(".jar") {
+            // TODO: This chain needs to be pulled out into a new function to consolidate with
+            // reindex_jar_dir
+            index_zip_archive(Path::new(jar_path_name))
+                .map(|tuples| {
+                    index_class_tuples(&class_packages_tree, &package_contents_tree, &tuples)
+                })
+                .map(|_| {
+                    class_packages_tree
+                        .flush()
+                        .and(package_contents_tree.flush())
+                })
+                .map_err(|e| {
+                    eprintln!(
+                        "Error: Could not store index entries for archive: {}: {}",
+                        jar_path_name, e
+                    );
+                });
         }
     }
     class_packages_tree.flush().unwrap();
@@ -156,4 +222,3 @@ pub fn walk_file_tree(dir: &Path, cb: &dyn Fn(&fs::DirEntry)) -> io::Result<()> 
     }
     Ok(())
 }
-

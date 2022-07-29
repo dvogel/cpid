@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::thread;
 use std::time;
-use std::os::unix::net::{UnixStream, UnixListener};
 
 extern crate serde_derive;
 extern crate serde_json;
@@ -16,12 +16,12 @@ extern crate sled;
 
 use anyhow::{bail, Result};
 // use serde::{Deserialize, Serialize};
-use serde_derive::{Serialize};
+use serde_derive::Serialize;
 use zip::read::ZipArchive;
 use zip::result::ZipResult;
 
-mod proto;
 mod indexes;
+mod proto;
 
 // types       SomeClassName: [my.pacakge.name, my.package.name.SomeClassName.class, my.package.name.jar]
 // type2pkg    SomeClassName: my.package.name
@@ -29,7 +29,6 @@ mod indexes;
 // type2jar    SomeClassName: my.package.name.jar
 
 // query: anyImportable([MyClassName, OtherClassName, ThingInPackage])
-
 
 // {
 //     "ClassName": [
@@ -41,30 +40,33 @@ mod indexes;
 // #[derive(Debug, PartialEq, Deserialize, Serialize)]
 // struct JarClassPackages(Vec<String>);
 
-
 fn create_or_open_db() -> Result<sled::Db> {
     let xdg = xdg::BaseDirectories::with_prefix("cpid").expect("XDG initialization.");
-    let db_path = xdg.place_data_file(Path::new("findex")).expect("writeable XDG data directory.");
+    let db_path = xdg
+        .place_data_file(Path::new("findex"))
+        .expect("writeable XDG data directory.");
     let db = sled::open(db_path).expect("writable database file.");
     Ok(db)
 }
 
 fn default_socket_path() -> Result<String> {
     let xdg = xdg::BaseDirectories::with_prefix("cpid").expect("XDG initialization.");
-    let db_path = xdg.place_state_file(Path::new("sock")).expect("writeable XDG state directory.");
+    let db_path = xdg
+        .place_state_file(Path::new("sock"))
+        .expect("writeable XDG state directory.");
     let usable_db_path = db_path.as_path().to_str().unwrap(); //ok_or(Err(String::from("usable XDG state directory path.")))?;
     Ok(String::from(usable_db_path))
 }
 
 #[derive(PartialEq, Serialize)]
 struct ClassQueryResponse {
-    results: HashMap<String, Vec<String>>
+    results: HashMap<String, Vec<String>>,
 }
 
 impl ClassQueryResponse {
     fn new() -> Self {
-        ClassQueryResponse{
-            results: HashMap::new()
+        ClassQueryResponse {
+            results: HashMap::new(),
         }
     }
 }
@@ -79,7 +81,7 @@ fn serve(db: &sled::Db, socket_path: String) -> Result<()> {
                 thread::spawn(move || {
                     proto::handle_client(db1, stream);
                 });
-            },
+            }
             Err(e) => {
                 eprintln!("Failed to handle incoming client: {}", e);
             }
@@ -96,7 +98,7 @@ fn main() -> Result<()> {
         cpid clsquery <index_name> <class_name>
         cpid reindex <index_name> <srcdir>
         cpid reindex <index_name> <classpath_expr>
-        cpid enumerate [pattern]
+        cpid enumerate <index_name> [pattern]
         cpid serve [/socket/path]
         "#;
 
@@ -107,16 +109,14 @@ fn main() -> Result<()> {
             let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
             let class_name = std::env::args().nth(3).expect(USAGE_TEXT);
             let results = indexes::query_class_index(&db, &index_name, &class_name)?;
-            let resp = ClassQueryResponse{
-                results: results
-            };
+            let resp = ClassQueryResponse { results: results };
             println!("{}", serde_json::to_string(&resp)?);
             Ok(())
-        },
+        }
         "enumerate" => {
             let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
             indexes::enumerate_indexes(&db, &index_name)
-        },
+        }
         "reindex" => {
             let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
             let jar_source = std::env::args().nth(3).expect(USAGE_TEXT);
@@ -126,13 +126,15 @@ fn main() -> Result<()> {
             } else {
                 indexes::reindex_classpath(&db, &index_name, &jar_source)
             }
-        },
+        }
         "serve" => {
             let default_path = default_socket_path()?;
             let path = std::env::args().nth(2).or(Some(default_path)).unwrap();
             serve(&db, path)
-        },
-        _ => { bail!(&USAGE_TEXT); }
+        }
+        _ => {
+            bail!(&USAGE_TEXT);
+        }
     };
     drop(db);
     subcmd_result
