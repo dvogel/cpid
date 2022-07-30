@@ -8,6 +8,9 @@ use std::io::Write;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
 
 use anyhow::{bail, Error, Result};
 
@@ -41,6 +44,7 @@ pub enum ClientMsg {
     PackageEnumerateQuery(PackageEnumerateArgs),
     ReindexPathCmd(ReindexArgs),
     ReindexClasspathCmd(ReindexArgs),
+    ShutdownCmd,
 }
 
 fn fmt_exec_result<T, E: Display>(res: Result<T, E>) -> String {
@@ -51,37 +55,29 @@ fn fmt_exec_result<T, E: Display>(res: Result<T, E>) -> String {
 }
 
 fn exec_class_query(db: &sled::Db, msg: ClassQueryArgs) -> Result<String> {
-    eprintln!(
-        "ClassQuery(index_name: {}, class_name: {})",
-        msg.index_name, msg.class_name
-    );
     let results = indexes::query_class_index(&db, &msg.index_name, &msg.class_name)?;
     let encoded = serde_json::to_string::<HashMap<String, Vec<String>>>(&results)?;
     Ok(encoded)
 }
 
 fn exec_reindex_classpath_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<String> {
-    eprintln!(
-        "ReindexClasspathCmd(index_name: {}, archive_source: {})",
-        msg.index_name, msg.archive_source
-    );
     indexes::reindex_classpath(&db, &msg.index_name, &msg.archive_source)?;
     let encoded = "{}".to_string();
     Ok(encoded)
 }
 
 fn exec_reindex_path_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<String> {
-    eprintln!(
-        "ReindexPathCmd(index_name: {}, archive_source: {})",
-        msg.index_name, msg.archive_source
-    );
     let path = Path::new(&msg.archive_source);
     indexes::reindex_jar_dir(&db, &msg.index_name, path)?;
     let encoded = "{}".to_string();
     Ok(encoded)
 }
 
-pub fn handle_client(db: sled::Db, mut stream: UnixStream) -> () {
+pub fn handle_client(
+    db: sled::Db,
+    mut stream: UnixStream,
+    mut shutdown_cond: Arc<AtomicBool>,
+) -> () {
     let mut write_stream = match stream.try_clone() {
         Ok(s) => s,
         Err(e) => {
@@ -102,15 +98,26 @@ pub fn handle_client(db: sled::Db, mut stream: UnixStream) -> () {
                     }
                     ClientMsg::ReindexClasspathCmd(args) => exec_reindex_classpath_cmd(&db, args),
                     ClientMsg::ReindexPathCmd(args) => exec_reindex_path_cmd(&db, args),
+                    ClientMsg::ShutdownCmd => {
+                        shutdown_cond.store(true, Ordering::SeqCst);
+                        eprintln!("Client requested shutdown.");
+                        break;
+                    }
+                    _ => Err(Error::msg("Unrecognized message type.")),
                 };
                 match encoded_resp {
                     Ok(s) => {
                         write_stream.write(s.as_bytes());
+                        write_stream.flush();
                     }
-                    Err(e) => eprintln!("ERR: {}", e),
+                    Err(e) => {
+                        eprintln!("ERR: {}", e);
+                        break;
+                    }
                 };
             }
             Err(e) => {
+                eprintln!("ERR: {}", e);
                 break;
             }
         }

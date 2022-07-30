@@ -7,6 +7,8 @@ use std::fs;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time;
 
@@ -20,8 +22,7 @@ use serde_derive::Serialize;
 use zip::read::ZipArchive;
 use zip::result::ZipResult;
 
-mod indexes;
-mod proto;
+use cpid;
 
 // types       SomeClassName: [my.pacakge.name, my.package.name.SomeClassName.class, my.package.name.jar]
 // type2pkg    SomeClassName: my.package.name
@@ -71,26 +72,6 @@ impl ClassQueryResponse {
     }
 }
 
-fn serve(db: &sled::Db, socket_path: String) -> Result<()> {
-    let listener = UnixListener::bind(&socket_path)?;
-    println!("Listening on {}", socket_path);
-    for client in listener.incoming() {
-        match client {
-            Ok(stream) => {
-                let db1 = db.clone();
-                thread::spawn(move || {
-                    proto::handle_client(db1, stream);
-                });
-            }
-            Err(e) => {
-                eprintln!("Failed to handle incoming client: {}", e);
-            }
-        }
-    }
-    std::fs::remove_file(socket_path)?;
-    Ok(())
-}
-
 fn main() -> Result<()> {
     const USAGE_TEXT: &str = r#"
         USAGE: cpid <reindex|enumerate|serve> ...
@@ -108,29 +89,30 @@ fn main() -> Result<()> {
         "clsquery" => {
             let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
             let class_name = std::env::args().nth(3).expect(USAGE_TEXT);
-            let results = indexes::query_class_index(&db, &index_name, &class_name)?;
+            let results = cpid::indexes::query_class_index(&db, &index_name, &class_name)?;
             let resp = ClassQueryResponse { results: results };
             println!("{}", serde_json::to_string(&resp)?);
             Ok(())
         }
         "enumerate" => {
             let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
-            indexes::enumerate_indexes(&db, &index_name)
+            cpid::indexes::enumerate_indexes(&db, &index_name)
         }
         "reindex" => {
             let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
             let jar_source = std::env::args().nth(3).expect(USAGE_TEXT);
             let jar_source_path = Path::new(&jar_source);
             if jar_source_path.is_dir() {
-                indexes::reindex_jar_dir(&db, &index_name, jar_source_path)
+                cpid::indexes::reindex_jar_dir(&db, &index_name, jar_source_path)
             } else {
-                indexes::reindex_classpath(&db, &index_name, &jar_source)
+                cpid::indexes::reindex_classpath(&db, &index_name, &jar_source)
             }
         }
         "serve" => {
             let default_path = default_socket_path()?;
             let path = std::env::args().nth(2).or(Some(default_path)).unwrap();
-            serve(&db, path)
+            cpid::serve::serve_unix(&db, path);
+            Ok(())
         }
         _ => {
             bail!(&USAGE_TEXT);
