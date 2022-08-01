@@ -111,7 +111,11 @@ fn main() -> Result<()> {
         "serve" => {
             let default_path = default_socket_path()?;
             let path = std::env::args().nth(2).or(Some(default_path)).unwrap();
-            cpid::serve::serve_unix(&db, path);
+            if path == "-" {
+                cpid::serve::serve_stdio(&db, io::stdin(), io::stdout());
+            } else {
+                cpid::serve::serve_unix(&db, path);
+            }
             Ok(())
         }
         _ => {

@@ -4,8 +4,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::io;
-use std::io::Write;
-use std::net::Shutdown;
+use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -73,21 +72,13 @@ fn exec_reindex_path_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<String> {
     Ok(encoded)
 }
 
-pub fn handle_client(
+pub fn handle_client<I: Read, O: Write>(
     db: sled::Db,
-    mut stream: UnixStream,
+    mut instream: I,
+    mut outstream: O,
     mut shutdown_cond: Arc<AtomicBool>,
 ) -> () {
-    let mut write_stream = match stream.try_clone() {
-        Ok(s) => s,
-        Err(e) => {
-            stream.flush();
-            stream.shutdown(Shutdown::Both);
-            return;
-        }
-    };
-
-    let msgs = serde_json::Deserializer::from_reader(io::BufReader::new(&stream));
+    let msgs = serde_json::Deserializer::from_reader(io::BufReader::new(instream));
     for msg in msgs.into_iter::<ClientMsg>() {
         match msg {
             Ok(msg1) => {
@@ -107,8 +98,8 @@ pub fn handle_client(
                 };
                 match encoded_resp {
                     Ok(s) => {
-                        write_stream.write(s.as_bytes());
-                        write_stream.flush();
+                        outstream.write(s.as_bytes());
+                        outstream.flush();
                     }
                     Err(e) => {
                         eprintln!("ERR: {}", e);
@@ -123,6 +114,5 @@ pub fn handle_client(
         }
     }
 
-    stream.flush();
-    stream.shutdown(Shutdown::Both);
+    outstream.flush();
 }

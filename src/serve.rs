@@ -1,6 +1,8 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 
+use std::io::{Read, Write};
+use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -9,7 +11,7 @@ use std::time::Duration;
 
 extern crate sled;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Error, Result};
 
 use crate::proto;
 
@@ -22,11 +24,20 @@ fn serve_accept_loop(
     println!("Listening on {}", socket_path);
     for client in listener.incoming() {
         match client {
-            Ok(stream) => {
+            Ok(mut stream) => {
                 let db1 = db.clone();
                 let shutdown_cond1 = shutdown_cond.clone();
+                let mut write_stream = match stream.try_clone() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        stream.flush();
+                        stream.shutdown(Shutdown::Both);
+                        return Err(Error::msg(format!("SOCKET ERROR: {}", e)));
+                    }
+                };
                 thread::spawn(move || {
-                    proto::handle_client(db1, stream, shutdown_cond1);
+                    proto::handle_client(db1, &mut stream, &mut write_stream, shutdown_cond1);
+                    stream.shutdown(Shutdown::Both);
                 });
             }
             Err(e) => {
@@ -52,5 +63,18 @@ pub fn serve_unix(db: &sled::Db, socket_path: String) -> Result<()> {
     }
 
     std::fs::remove_file(socket_path)?;
+    Ok(())
+}
+
+pub fn serve_stdio<I: Read, O: Write>(
+    db: &sled::Db,
+    mut instream: I,
+    mut outstream: O,
+) -> Result<()> {
+    let mut shutdown_cond = Arc::new(AtomicBool::new(false));
+    let db1 = db.clone();
+    proto::handle_client(db1, &mut instream, &mut outstream, shutdown_cond);
+    outstream.flush();
+    db.flush();
     Ok(())
 }
