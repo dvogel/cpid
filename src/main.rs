@@ -59,24 +59,12 @@ fn default_socket_path() -> Result<String> {
     Ok(String::from(usable_db_path))
 }
 
-#[derive(PartialEq, Serialize)]
-struct ClassQueryResponse {
-    results: HashMap<String, Vec<String>>,
-}
-
-impl ClassQueryResponse {
-    fn new() -> Self {
-        ClassQueryResponse {
-            results: HashMap::new(),
-        }
-    }
-}
-
 fn main() -> Result<()> {
     const USAGE_TEXT: &str = r#"
         USAGE: cpid <reindex|enumerate|serve> ...
 
         cpid clsquery <index_name> <class_name>
+        cpid pkgenum <index_name> <package_name>
         cpid reindex <index_name> <srcdir>
         cpid reindex <index_name> <classpath_expr>
         cpid enumerate <index_name> [pattern]
@@ -90,8 +78,14 @@ fn main() -> Result<()> {
             let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
             let class_name = std::env::args().nth(3).expect(USAGE_TEXT);
             let results = cpid::indexes::query_class_index(&db, &index_name, &class_name)?;
-            let resp = ClassQueryResponse { results: results };
-            println!("{}", serde_json::to_string(&resp)?);
+            println!("{}", serde_json::to_string(&results)?);
+            Ok(())
+        }
+        "pkgenum" => {
+            let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
+            let pkg_name = std::env::args().nth(3).expect(USAGE_TEXT);
+            let results = cpid::indexes::query_package_index(&db, &index_name, &pkg_name)?;
+            println!("{}", serde_json::to_string(&results)?);
             Ok(())
         }
         "enumerate" => {

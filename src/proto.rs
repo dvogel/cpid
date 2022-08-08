@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::thread;
 
 use anyhow::{bail, Error, Result};
+use serde_derive::Serialize;
 
 extern crate serde_derive;
 extern crate serde_json;
@@ -23,6 +24,8 @@ use crate::indexes;
 pub struct ClassQueryArgs {
     index_name: String,
     class_name: String,
+    #[serde(default)]
+    request_id: String,
 }
 
 #[derive(Debug, PartialEq, serde_derive::Deserialize)]
@@ -33,7 +36,10 @@ pub struct ReindexArgs {
 
 #[derive(Debug, PartialEq, serde_derive::Deserialize)]
 pub struct PackageEnumerateArgs {
-    pacakge_name: String,
+    index_name: String,
+    package_name: String,
+    #[serde(default)]
+    request_id: String,
 }
 
 #[derive(Debug, PartialEq, serde_derive::Deserialize)]
@@ -46,6 +52,54 @@ pub enum ClientMsg {
     ShutdownCmd,
 }
 
+#[derive(Debug, PartialEq, Serialize)]
+pub struct ClassQueryResponseArgs {
+    request_type: String,
+    request_id: String,
+    pub results: HashMap<String, Vec<String>>,
+}
+
+impl ClassQueryResponseArgs {
+    pub fn new(request_args: &ClassQueryArgs, results: HashMap<String, Vec<String>>) -> Self {
+        Self {
+            request_id: request_args.request_id.clone(),
+            results,
+            request_type: String::from("ClassQuery"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct PackageEnumerateQueryResponseArgs {
+    request_type: String,
+    request_id: String,
+    pub results: HashMap<String, Vec<String>>,
+}
+
+impl PackageEnumerateQueryResponseArgs {
+    pub fn new(request_args: &PackageEnumerateArgs, results: HashMap<String, Vec<String>>) -> Self {
+        Self {
+            results,
+            request_id: request_args.request_id.clone(),
+            request_type: String::from("PackageEnumerateQuery"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, serde_derive::Serialize)]
+#[serde(tag = "type")]
+pub enum ResponseMsg {
+    ClassQueryResponse(ClassQueryResponseArgs),
+    PackageEnumerateQueryResponse(PackageEnumerateQueryResponseArgs),
+    NullResponse,
+}
+
+#[derive(Debug, PartialEq, serde_derive::Deserialize)]
+pub struct ChannelMsg(u32, ClientMsg);
+
+#[derive(Debug, PartialEq, serde_derive::Serialize)]
+pub struct ChannelResponse(u32, ResponseMsg);
+
 fn fmt_exec_result<T, E: Display>(res: Result<T, E>) -> String {
     match res {
         Ok(_) => "OK".to_string(),
@@ -53,39 +107,45 @@ fn fmt_exec_result<T, E: Display>(res: Result<T, E>) -> String {
     }
 }
 
-fn exec_class_query(db: &sled::Db, msg: ClassQueryArgs) -> Result<String> {
+fn exec_class_query(db: &sled::Db, msg: ClassQueryArgs) -> Result<ResponseMsg> {
     let results = indexes::query_class_index(&db, &msg.index_name, &msg.class_name)?;
-    let encoded = serde_json::to_string::<HashMap<String, Vec<String>>>(&results)?;
-    Ok(encoded)
+    Ok(ResponseMsg::ClassQueryResponse(
+        ClassQueryResponseArgs::new(&msg, results),
+    ))
 }
 
-fn exec_reindex_classpath_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<String> {
+fn exec_package_enumerate_query(db: &sled::Db, msg: PackageEnumerateArgs) -> Result<ResponseMsg> {
+    let results = indexes::query_package_index(&db, &msg.index_name, &msg.package_name)?;
+    Ok(ResponseMsg::PackageEnumerateQueryResponse(
+        PackageEnumerateQueryResponseArgs::new(&msg, results),
+    ))
+}
+
+fn exec_reindex_classpath_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<ResponseMsg> {
     indexes::reindex_classpath(&db, &msg.index_name, &msg.archive_source)?;
-    let encoded = "{}".to_string();
-    Ok(encoded)
+    Ok(ResponseMsg::NullResponse)
 }
 
-fn exec_reindex_path_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<String> {
+fn exec_reindex_path_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<ResponseMsg> {
     let path = Path::new(&msg.archive_source);
     indexes::reindex_jar_dir(&db, &msg.index_name, path)?;
-    let encoded = "{}".to_string();
-    Ok(encoded)
+    Ok(ResponseMsg::NullResponse)
 }
 
 pub fn handle_client<I: Read, O: Write>(
     db: sled::Db,
-    mut instream: I,
+    instream: I,
     mut outstream: O,
-    mut shutdown_cond: Arc<AtomicBool>,
+    shutdown_cond: Arc<AtomicBool>,
 ) -> () {
     let msgs = serde_json::Deserializer::from_reader(io::BufReader::new(instream));
-    for msg in msgs.into_iter::<ClientMsg>() {
+    for msg in msgs.into_iter::<ChannelMsg>() {
         match msg {
             Ok(msg1) => {
-                let encoded_resp = match msg1 {
+                let resp_msg: Result<ResponseMsg> = match msg1.1 {
                     ClientMsg::ClassQuery(args) => exec_class_query(&db, args),
                     ClientMsg::PackageEnumerateQuery(args) => {
-                        Err(Error::msg("Not implemented yet."))
+                        exec_package_enumerate_query(&db, args)
                     }
                     ClientMsg::ReindexClasspathCmd(args) => exec_reindex_classpath_cmd(&db, args),
                     ClientMsg::ReindexPathCmd(args) => exec_reindex_path_cmd(&db, args),
@@ -96,16 +156,21 @@ pub fn handle_client<I: Read, O: Write>(
                     }
                     _ => Err(Error::msg("Unrecognized message type.")),
                 };
-                match encoded_resp {
-                    Ok(s) => {
-                        outstream.write(s.as_bytes());
-                        outstream.flush();
-                    }
-                    Err(e) => {
-                        eprintln!("ERR: {}", e);
-                        break;
-                    }
-                };
+                let write_result = resp_msg
+                    .and_then(|m| {
+                        serde_json::to_string::<ChannelResponse>(&ChannelResponse(msg1.0, m))
+                            .map_err(|e| anyhow::Error::new(e))
+                    })
+                    .and_then(|s| {
+                        outstream
+                            .write_all(s.as_bytes())
+                            .and_then(|_| outstream.flush())
+                            .map_err(|e| anyhow::Error::new(e))
+                    })
+                    .map_err(|e| eprintln!("ERR: {}", e));
+                if let Err(e) = write_result {
+                    break;
+                }
             }
             Err(e) => {
                 eprintln!("ERR: {}", e);

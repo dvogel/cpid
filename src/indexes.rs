@@ -145,9 +145,33 @@ pub fn query_class_index(
     let maybe_val = class_packages_tree.get(class_name)?;
     let mut results: HashMap<String, Vec<String>> = HashMap::new();
     match maybe_val {
-        None => bail!("class name is unknown: {}", class_name),
+        None => {
+            results.insert(class_name.to_string(), Vec::new());
+        }
         Some(val_bytes) => {
             results.insert(class_name.to_string(), serde_json::from_slice(&val_bytes)?);
+        }
+    };
+    Ok(results)
+}
+
+pub fn query_package_index(
+    db: &sled::Db,
+    index_name: &str,
+    package_name: &str,
+) -> Result<HashMap<String, Vec<String>>> {
+    let package_contents_tree = open_package_contents_tree(db, index_name);
+    let maybe_val = package_contents_tree.get(package_name)?;
+    let mut results: HashMap<String, Vec<String>> = HashMap::new();
+    match maybe_val {
+        None => {
+            results.insert(package_name.to_string(), Vec::new());
+        }
+        Some(val_bytes) => {
+            results.insert(
+                package_name.to_string(),
+                serde_json::from_slice(&val_bytes)?,
+            );
         }
     };
     Ok(results)
