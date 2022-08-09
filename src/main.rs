@@ -16,7 +16,7 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate sled;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Error, Result};
 // use serde::{Deserialize, Serialize};
 use serde_derive::Serialize;
 use zip::read::ZipArchive;
@@ -71,30 +71,46 @@ fn main() -> Result<()> {
         cpid serve [/socket/path]
         "#;
 
+    let usage_error = |trailer: &str| -> Error { anyhow!("{}\n{}", &USAGE_TEXT, trailer) };
+
     let subcmd = std::env::args().nth(1).expect(USAGE_TEXT);
     let db = create_or_open_db().expect("writable database file.");
     let subcmd_result = match subcmd.as_str() {
         "clsquery" => {
-            let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
-            let class_name = std::env::args().nth(3).expect(USAGE_TEXT);
+            let index_name = std::env::args()
+                .nth(2)
+                .ok_or_else(|| usage_error("Index name required."))?;
+            let class_name = std::env::args()
+                .nth(3)
+                .ok_or_else(|| usage_error("Class name required."))?;
             let results = cpid::indexes::query_class_index(&db, &index_name, &class_name)?;
             println!("{}", serde_json::to_string(&results)?);
             Ok(())
         }
         "pkgenum" => {
-            let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
-            let pkg_name = std::env::args().nth(3).expect(USAGE_TEXT);
+            let index_name = std::env::args()
+                .nth(2)
+                .ok_or_else(|| usage_error("Index name required."))?;
+            let pkg_name = std::env::args()
+                .nth(3)
+                .ok_or_else(|| usage_error("Package name required."))?;
             let results = cpid::indexes::query_package_index(&db, &index_name, &pkg_name)?;
             println!("{}", serde_json::to_string(&results)?);
             Ok(())
         }
         "enumerate" => {
-            let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
+            let index_name = std::env::args()
+                .nth(2)
+                .ok_or_else(|| usage_error("Index name required."))?;
             cpid::indexes::enumerate_indexes(&db, &index_name)
         }
         "reindex" => {
-            let index_name = std::env::args().nth(2).expect(USAGE_TEXT);
-            let jar_source = std::env::args().nth(3).expect(USAGE_TEXT);
+            let index_name = std::env::args()
+                .nth(2)
+                .ok_or_else(|| usage_error("Index name required."))?;
+            let jar_source = std::env::args()
+                .nth(3)
+                .ok_or_else(|| usage_error("Class name required."))?;
             let jar_source_path = Path::new(&jar_source);
             if jar_source_path.is_dir() {
                 cpid::indexes::reindex_jar_dir(&db, &index_name, jar_source_path)
