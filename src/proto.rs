@@ -24,8 +24,6 @@ use crate::indexes;
 pub struct ClassQueryArgs {
     index_name: String,
     class_name: String,
-    #[serde(default)]
-    request_id: String,
 }
 
 #[derive(Debug, PartialEq, serde_derive::Deserialize)]
@@ -38,8 +36,6 @@ pub struct ReindexArgs {
 pub struct PackageEnumerateArgs {
     index_name: String,
     package_name: String,
-    #[serde(default)]
-    request_id: String,
 }
 
 #[derive(Debug, PartialEq, serde_derive::Deserialize)]
@@ -54,35 +50,23 @@ pub enum ClientMsg {
 
 #[derive(Debug, PartialEq, Serialize)]
 pub struct ClassQueryResponseArgs {
-    request_type: String,
-    request_id: String,
     pub results: HashMap<String, Vec<String>>,
 }
 
 impl ClassQueryResponseArgs {
     pub fn new(request_args: &ClassQueryArgs, results: HashMap<String, Vec<String>>) -> Self {
-        Self {
-            request_id: request_args.request_id.clone(),
-            results,
-            request_type: String::from("ClassQuery"),
-        }
+        Self { results }
     }
 }
 
 #[derive(Debug, PartialEq, Serialize)]
 pub struct PackageEnumerateQueryResponseArgs {
-    request_type: String,
-    request_id: String,
     pub results: HashMap<String, Vec<String>>,
 }
 
 impl PackageEnumerateQueryResponseArgs {
     pub fn new(request_args: &PackageEnumerateArgs, results: HashMap<String, Vec<String>>) -> Self {
-        Self {
-            results,
-            request_id: request_args.request_id.clone(),
-            request_type: String::from("PackageEnumerateQuery"),
-        }
+        Self { results }
     }
 }
 

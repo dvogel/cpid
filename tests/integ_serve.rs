@@ -64,11 +64,11 @@ fn enumerate_sample_project_classpath() -> Result<()> {
 
     let classpath = std::fs::read_to_string("vim-cpid/test-app/pom.xml.classpath-cache")?;
     let reindex_cmd = format!(
-        r#"{{
+        r#"[1, {{
             "type":"ReindexClasspathCmd",
             "index_name": "testidx",
             "archive_source": "{}"
-        }}"#,
+        }}]"#,
         classpath
     );
     client_socket.write_all(&reindex_cmd.as_bytes());
@@ -77,16 +77,15 @@ fn enumerate_sample_project_classpath() -> Result<()> {
         .next()
         .expect("Reply read failure.")
         .expect("JSON deserialization failure.");
-    assert_eq!(
-        serde_json::Value::Object(serde_json::Map::new()),
-        reindex_reply
-    );
+    let expected_reindex_reply: serde_json::Value =
+        serde_json::from_str::<serde_json::Value>(r#"[1,{"type":"NullResponse"}]"#)?;
+    assert_eq!(expected_reindex_reply, reindex_reply);
 
-    let query_msg = r#"{
+    let query_msg = r#"[2, {
             "type":"ClassQuery",
             "index_name": "testidx",
             "class_name": "Timeout"
-        }"#;
+        }]"#;
     client_socket.write_all(&query_msg.as_bytes());
     client_socket.flush();
 
@@ -95,11 +94,11 @@ fn enumerate_sample_project_classpath() -> Result<()> {
         .expect("Reply read failure.")
         .expect("JSON deserialization failure.");
     let expected_qry_reply: serde_json::Value = serde_json::from_str::<serde_json::Value>(
-        r#"{"Timeout":["org.junit.rules","org.openjdk.jmh.annotations"]}"#,
+        r#"[2,{"type":"ClassQueryResponse","results":{"Timeout":["org.junit.rules","org.openjdk.jmh.annotations"]}}]"#,
     )?;
     assert_eq!(expected_qry_reply, qry_reply);
 
-    client_socket.write_all(r#"{"type":"ShutdownCmd"}"#.as_bytes());
+    client_socket.write_all(r#"[3, {"type":"ShutdownCmd"}]"#.as_bytes());
     serve_thread.join();
     Ok(())
 }
