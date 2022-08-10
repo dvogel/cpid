@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::io;
+use std::io::{stdin, stdout, Read};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,6 +59,15 @@ fn default_socket_path() -> Result<String> {
     Ok(String::from(usable_db_path))
 }
 
+fn is_jimage_file(path: &str) -> bool {
+    let mut buf = [0; 4];
+    return std::fs::File::open(path)
+        .and_then(|mut inf| inf.read_exact(&mut buf))
+        .map(|()| buf[0] == 0xda && buf[1] == 0xda && buf[2] == 0xfe && buf[3] == 0xca)
+        .or::<std::io::Error>(Ok(false))
+        .unwrap();
+}
+
 fn main() -> Result<()> {
     const USAGE_TEXT: &str = r#"
         USAGE: cpid <reindex|enumerate|serve> ...
@@ -67,6 +76,7 @@ fn main() -> Result<()> {
         cpid pkgenum <index_name> <package_name>
         cpid reindex <index_name> <srcdir>
         cpid reindex <index_name> <classpath_expr>
+        cpid reindex <index_name> <image_path>
         cpid enumerate <index_name> [pattern]
         cpid serve [/socket/path]
         "#;
@@ -114,6 +124,9 @@ fn main() -> Result<()> {
             let jar_source_path = Path::new(&jar_source);
             if jar_source_path.is_dir() {
                 cpid::indexes::reindex_jar_dir(&db, &index_name, jar_source_path)
+            } else if jar_source_path.is_file() && is_jimage_file(&jar_source) {
+                let results = cpid::indexes::reindex_jimage(&db, &index_name, jar_source_path)?;
+                Ok(())
             } else {
                 cpid::indexes::reindex_classpath(&db, &index_name, &jar_source)
             }
@@ -122,7 +135,7 @@ fn main() -> Result<()> {
             let default_path = default_socket_path()?;
             let path = std::env::args().nth(2).or(Some(default_path)).unwrap();
             if path == "-" {
-                cpid::serve::serve_stdio(&db, io::stdin(), io::stdout());
+                cpid::serve::serve_stdio(&db, stdin(), stdout());
             } else {
                 cpid::serve::serve_unix(&db, path);
             }

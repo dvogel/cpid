@@ -5,9 +5,12 @@ use std::collections::HashMap;
 use std::convert::identity;
 use std::fs;
 use std::io;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::process::{Command, Stdio};
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
+use regex::Regex;
 use zip::read::ZipArchive;
 use zip::result::ZipResult;
 
@@ -73,7 +76,6 @@ pub fn index_class_tuples(
     tuples: &[(String, String, String)],
 ) -> Result<(), String> {
     for (class_name, package_name, zip_path) in tuples {
-        println!("({}, {})", class_name, package_name);
         class_packages_tree
             .update_and_fetch(class_name, |bytes: Option<&[u8]>| {
                 merge_string_into_list(package_name, bytes)
@@ -118,6 +120,58 @@ pub fn index_zip_archive(path: &Path) -> Result<Vec<(String, String, String)>> {
             }
         }
     }
+    Ok(accum)
+}
+
+pub fn index_jimage(path: &Path) -> Result<Vec<(String, String, String)>> {
+    let jimage_child = Command::new("jimage")
+        .arg("list")
+        .arg(path)
+        .stdout(Stdio::piped())
+        .spawn()?;
+
+    let mut accum: Vec<(String, String, String)> = Vec::new();
+    let instream = jimage_child
+        .stdout
+        .map(|r| BufReader::new(r))
+        .ok_or(anyhow!("Failed to read jimage process outpout."))?;
+
+    let module_header_pat = Regex::new(r"^Module: (.+)$").unwrap();
+    // This intentionally omits the '$' character used to indicate inner classes.
+    let class_entry_pat = Regex::new(r"^\s+([a-z0-9]+[/])+([A-Za-z0-9_]+).class").unwrap();
+
+    let mut curr_module = String::new();
+
+    for ln_res in instream.lines() {
+        if let Ok(ln) = ln_res {
+            if let Some(caps) = module_header_pat.captures(&ln) {
+                curr_module = String::from(caps.get(1).unwrap().as_str());
+            } else if let Some(caps) = class_entry_pat.captures(&ln) {
+                let captured_fname = caps.get(0).unwrap().as_str();
+                let filename = String::from(captured_fname.trim());
+                if let Some(stub) = filename.strip_suffix(".class") {
+                    let mut parts = stub.split('/').collect::<Vec<&str>>();
+                    match parts.len() {
+                        0..=1 => eprintln!(
+                            "Skipping because it lack enough path components: '{}'",
+                            filename
+                        ),
+                        _ => {
+                            if let Some(class_name) = parts.pop() {
+                                let package_name = parts.join(".");
+                                accum.push((
+                                    class_name.to_string(),
+                                    package_name.to_string(),
+                                    filename.to_string(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Ok(accum)
 }
 
@@ -231,6 +285,26 @@ pub fn reindex_classpath(db: &sled::Db, index_name: &str, class_path: &str) -> R
         }
     }
     class_packages_tree.flush().unwrap();
+    Ok(())
+}
+
+pub fn reindex_jimage(db: &sled::Db, index_name: &str, jimage_path: &Path) -> Result<()> {
+    let class_packages_tree = open_class_packages_tree(db, index_name);
+    let package_contents_tree = open_package_contents_tree(db, index_name);
+    index_jimage(jimage_path)
+        .map(|tuples| index_class_tuples(&class_packages_tree, &package_contents_tree, &tuples))
+        .map(|_| {
+            class_packages_tree
+                .flush()
+                .and(package_contents_tree.flush())
+        })
+        .map_err(|e| {
+            eprintln!(
+                "Error: Could not store index entries for image: {}: {}",
+                jimage_path.to_str().unwrap(),
+                e
+            );
+        });
     Ok(())
 }
 
