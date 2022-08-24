@@ -17,6 +17,7 @@ extern crate serde_json;
 extern crate sled;
 
 use anyhow::{anyhow, bail, Error, Result};
+use regex::Regex;
 // use serde::{Deserialize, Serialize};
 use serde_derive::Serialize;
 use zip::read::ZipArchive;
@@ -77,6 +78,7 @@ fn main() -> Result<()> {
         cpid reindex <index_name> <srcdir>
         cpid reindex <index_name> <classpath_expr>
         cpid reindex <index_name> <image_path>
+        cpid indexes
         cpid enumerate <index_name> [pattern]
         cpid serve [/socket/path]
         "#;
@@ -113,6 +115,16 @@ fn main() -> Result<()> {
                 .nth(2)
                 .ok_or_else(|| usage_error("Index name required."))?;
             cpid::indexes::enumerate_indexes(&db, &index_name)
+        }
+        "indexes" => {
+            let index_name_pat = Regex::new(r"(.+)-class_pkgs").unwrap();
+            for name_bytes in db.tree_names() {
+                let name = String::from_utf8_lossy(name_bytes.as_ref());
+                if let Some(caps) = index_name_pat.captures(&name) {
+                    println!("{}", caps.get(1).unwrap().as_str());
+                }
+            }
+            Ok(())
         }
         "reindex" => {
             let index_name = std::env::args()
