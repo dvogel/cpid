@@ -27,6 +27,12 @@ pub struct ClassQueryArgs {
 }
 
 #[derive(Debug, PartialEq, serde_derive::Deserialize)]
+pub struct ClassMultiQueryArgs {
+    index_names: Vec<String>,
+    class_name: String,
+}
+
+#[derive(Debug, PartialEq, serde_derive::Deserialize)]
 pub struct ReindexArgs {
     index_name: String,
     archive_source: String,
@@ -39,10 +45,18 @@ pub struct PackageEnumerateArgs {
 }
 
 #[derive(Debug, PartialEq, serde_derive::Deserialize)]
+pub struct PackageMultiEnumerateArgs {
+    index_names: Vec<String>,
+    package_name: String,
+}
+
+#[derive(Debug, PartialEq, serde_derive::Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientMsg {
     ClassQuery(ClassQueryArgs),
+    ClassMultiQuery(ClassMultiQueryArgs),
     PackageEnumerateQuery(PackageEnumerateArgs),
+    PackageMultiEnumerateQuery(PackageMultiEnumerateArgs),
     ReindexPathCmd(ReindexArgs),
     ReindexClasspathCmd(ReindexArgs),
     ShutdownCmd,
@@ -54,7 +68,7 @@ pub struct ClassQueryResponseArgs {
 }
 
 impl ClassQueryResponseArgs {
-    pub fn new(request_args: &ClassQueryArgs, results: HashMap<String, Vec<String>>) -> Self {
+    pub fn new(results: HashMap<String, Vec<String>>) -> Self {
         Self { results }
     }
 }
@@ -65,7 +79,7 @@ pub struct PackageEnumerateQueryResponseArgs {
 }
 
 impl PackageEnumerateQueryResponseArgs {
-    pub fn new(request_args: &PackageEnumerateArgs, results: HashMap<String, Vec<String>>) -> Self {
+    pub fn new(results: HashMap<String, Vec<String>>) -> Self {
         Self { results }
     }
 }
@@ -94,14 +108,41 @@ fn fmt_exec_result<T, E: Display>(res: Result<T, E>) -> String {
 fn exec_class_query(db: &sled::Db, msg: ClassQueryArgs) -> Result<ResponseMsg> {
     let results = indexes::query_class_index(&db, &msg.index_name, &msg.class_name)?;
     Ok(ResponseMsg::ClassQueryResponse(
-        ClassQueryResponseArgs::new(&msg, results),
+        ClassQueryResponseArgs::new(results),
+    ))
+}
+
+fn exec_class_multi_query(db: &sled::Db, msg: ClassMultiQueryArgs) -> Result<ResponseMsg> {
+    let mut results: HashMap<String, Vec<String>> = HashMap::new();
+    for idx_name in msg.index_names {
+        let results1 = indexes::query_class_index(&db, &idx_name, &msg.class_name)?;
+        results.extend(results1);
+    }
+
+    Ok(ResponseMsg::ClassQueryResponse(
+        ClassQueryResponseArgs::new(results),
     ))
 }
 
 fn exec_package_enumerate_query(db: &sled::Db, msg: PackageEnumerateArgs) -> Result<ResponseMsg> {
     let results = indexes::query_package_index(&db, &msg.index_name, &msg.package_name)?;
     Ok(ResponseMsg::PackageEnumerateQueryResponse(
-        PackageEnumerateQueryResponseArgs::new(&msg, results),
+        PackageEnumerateQueryResponseArgs::new(results),
+    ))
+}
+
+fn exec_package_multi_enumerate_query(
+    db: &sled::Db,
+    msg: PackageMultiEnumerateArgs,
+) -> Result<ResponseMsg> {
+    let mut results: HashMap<String, Vec<String>> = HashMap::new();
+    for idx_name in msg.index_names {
+        let results1 = indexes::query_package_index(&db, &idx_name, &msg.package_name)?;
+        results.extend(results1);
+    }
+
+    Ok(ResponseMsg::PackageEnumerateQueryResponse(
+        PackageEnumerateQueryResponseArgs::new(results),
     ))
 }
 
@@ -128,8 +169,12 @@ pub fn handle_client<I: Read, O: Write>(
             Ok(msg1) => {
                 let resp_msg: Result<ResponseMsg> = match msg1.1 {
                     ClientMsg::ClassQuery(args) => exec_class_query(&db, args),
+                    ClientMsg::ClassMultiQuery(args) => exec_class_multi_query(&db, args),
                     ClientMsg::PackageEnumerateQuery(args) => {
                         exec_package_enumerate_query(&db, args)
+                    }
+                    ClientMsg::PackageMultiEnumerateQuery(args) => {
+                        exec_package_multi_enumerate_query(&db, args)
                     }
                     ClientMsg::ReindexClasspathCmd(args) => exec_reindex_classpath_cmd(&db, args),
                     ClientMsg::ReindexPathCmd(args) => exec_reindex_path_cmd(&db, args),
