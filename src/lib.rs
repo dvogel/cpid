@@ -20,5 +20,6 @@ use zip::read::ZipArchive;
 use zip::result::ZipResult;
 
 pub mod indexes;
+pub mod jdk;
 pub mod proto;
 pub mod serve;

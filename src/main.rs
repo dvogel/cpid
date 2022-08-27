@@ -16,7 +16,7 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate sled;
 
-use anyhow::{anyhow, bail, Error, Result};
+use anyhow::{anyhow, bail, Context, Error, Result};
 use regex::Regex;
 // use serde::{Deserialize, Serialize};
 use serde_derive::Serialize;
@@ -24,6 +24,7 @@ use zip::read::ZipArchive;
 use zip::result::ZipResult;
 
 use cpid;
+use cpid::jdk::is_jimage_file;
 
 // types       SomeClassName: [my.pacakge.name, my.package.name.SomeClassName.class, my.package.name.jar]
 // type2pkg    SomeClassName: my.package.name
@@ -43,30 +44,26 @@ use cpid;
 // struct JarClassPackages(Vec<String>);
 
 fn create_or_open_db() -> Result<sled::Db> {
-    let xdg = xdg::BaseDirectories::with_prefix("cpid").expect("XDG initialization.");
+    let xdg = xdg::BaseDirectories::with_prefix("cpid")
+        .map_err(|e| Error::msg("XDG library initialization failed."))?;
     let db_path = xdg
         .place_data_file(Path::new("findex"))
-        .expect("writeable XDG data directory.");
-    let db = sled::open(db_path).expect("writable database file.");
+        .with_context(|| Error::msg("The XDG data directory is not writable."))?;
+    let db = sled::open(db_path)?;
     Ok(db)
 }
 
 fn default_socket_path() -> Result<String> {
-    let xdg = xdg::BaseDirectories::with_prefix("cpid").expect("XDG initialization.");
+    let xdg = xdg::BaseDirectories::with_prefix("cpid")
+        .map_err(|e| Error::msg("XDG library initialization fails."))?;
     let db_path = xdg
         .place_state_file(Path::new("sock"))
-        .expect("writeable XDG state directory.");
-    let usable_db_path = db_path.as_path().to_str().unwrap(); //ok_or(Err(String::from("usable XDG state directory path.")))?;
+        .with_context(|| Error::msg("The XDG state directory is not writable."))?;
+    let usable_db_path = db_path
+        .as_path()
+        .to_str()
+        .ok_or_else(|| Error::msg("The XDG state directory path is not UNICODE-compatible."))?;
     Ok(String::from(usable_db_path))
-}
-
-fn is_jimage_file(path: &str) -> bool {
-    let mut buf = [0; 4];
-    return std::fs::File::open(path)
-        .and_then(|mut inf| inf.read_exact(&mut buf))
-        .map(|()| buf[0] == 0xda && buf[1] == 0xda && buf[2] == 0xfe && buf[3] == 0xca)
-        .or::<std::io::Error>(Ok(false))
-        .unwrap();
 }
 
 fn main() -> Result<()> {
@@ -86,7 +83,7 @@ fn main() -> Result<()> {
     let usage_error = |trailer: &str| -> Error { anyhow!("{}\n{}", &USAGE_TEXT, trailer) };
 
     let subcmd = std::env::args().nth(1).expect(USAGE_TEXT);
-    let db = create_or_open_db().expect("writable database file.");
+    let db = create_or_open_db()?;
     let subcmd_result = match subcmd.as_str() {
         "clsquery" => {
             let index_name = std::env::args()

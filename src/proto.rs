@@ -19,6 +19,7 @@ extern crate serde_json;
 extern crate sled;
 
 use crate::indexes;
+use crate::jdk::is_jimage_file;
 
 #[derive(Debug, PartialEq, serde_derive::Deserialize)]
 pub struct ClassQueryArgs {
@@ -153,7 +154,14 @@ fn exec_reindex_classpath_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<Respons
 
 fn exec_reindex_path_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<ResponseMsg> {
     let path = Path::new(&msg.archive_source);
-    indexes::reindex_jar_dir(&db, &msg.index_name, path)?;
+    let pathStr = path.to_str().ok_or_else(|| {
+        anyhow::Error::msg("Invalid archive source path provided in protocol message.")
+    })?;
+    if path.is_file() && is_jimage_file(pathStr) {
+        indexes::reindex_jimage(&db, &msg.index_name, path)?;
+    } else if path.is_dir() {
+        indexes::reindex_jar_dir(&db, &msg.index_name, path)?;
+    }
     Ok(ResponseMsg::NullResponse)
 }
 
