@@ -11,7 +11,7 @@ use std::time::Duration;
 
 extern crate sled;
 
-use anyhow::{bail, Error, Result};
+use anyhow::{bail, Context, Error, Result};
 
 use crate::proto;
 
@@ -20,6 +20,9 @@ fn serve_accept_loop(
     socket_path: String,
     shutdown_cond: Arc<AtomicBool>,
 ) -> Result<()> {
+    std::fs::remove_file(&socket_path)
+        .with_context(|| format!("When removing previous unix domain socket."))?;
+
     let listener = UnixListener::bind(&socket_path)?;
     println!("Listening on {}", socket_path);
     for client in listener.incoming() {
