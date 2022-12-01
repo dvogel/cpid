@@ -117,7 +117,11 @@ fn exec_class_multi_query(db: &sled::Db, msg: ClassMultiQueryArgs) -> Result<Res
     let mut results: HashMap<String, Vec<String>> = HashMap::new();
     for idx_name in msg.index_names {
         let results1 = indexes::query_class_index(&db, &idx_name, &msg.class_name)?;
-        results.extend(results1);
+        for (rk1, rv1) in results1.into_iter() {
+            let mut rv = results.get(&rk1).unwrap_or(&Vec::new()).clone();
+            rv.extend(rv1);
+            results.insert(rk1, rv);
+        }
     }
 
     Ok(ResponseMsg::ClassQueryResponse(
@@ -139,7 +143,11 @@ fn exec_package_multi_enumerate_query(
     let mut results: HashMap<String, Vec<String>> = HashMap::new();
     for idx_name in msg.index_names {
         let results1 = indexes::query_package_index(&db, &idx_name, &msg.package_name)?;
-        results.extend(results1);
+        for (rk1, rv1) in results1.into_iter() {
+            let mut rv = results.get(&rk1).unwrap_or(&Vec::new()).clone();
+            rv.extend(rv1);
+            results.insert(rk1, rv);
+        }
     }
 
     Ok(ResponseMsg::PackageEnumerateQueryResponse(
