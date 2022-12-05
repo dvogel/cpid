@@ -25,6 +25,7 @@ use zip::result::ZipResult;
 
 use cpid;
 use cpid::jdk::is_jimage_file;
+use cpid::project::crawl_project;
 
 // types       SomeClassName: [my.pacakge.name, my.package.name.SomeClassName.class, my.package.name.jar]
 // type2pkg    SomeClassName: my.package.name
@@ -66,23 +67,96 @@ fn default_socket_path() -> Result<String> {
     Ok(String::from(usable_db_path))
 }
 
-fn main() -> Result<()> {
+fn usage_error(trailer: &str) -> anyhow::Error {
     const USAGE_TEXT: &str = r#"
         USAGE: cpid <reindex|enumerate|serve> ...
 
         cpid clsquery <index_name> <class_name>
         cpid pkgenum <index_name> <package_name>
-        cpid reindex <index_name> <srcdir>
-        cpid reindex <index_name> <classpath_expr>
-        cpid reindex <index_name> <image_path>
+        cpid reindex classpath <classpath_expr>
+        cpid reindex jardir <index_name> <jardir>
+        cpid reindex jimage <index_name> <image_path>
+        cpid reindex project <index_name> <srcdir>
         cpid indexes
         cpid enumerate <index_name> [pattern]
         cpid serve [/socket/path]
         "#;
 
-    let usage_error = |trailer: &str| -> Error { anyhow!("{}\n{}", &USAGE_TEXT, trailer) };
+    anyhow!("{}\n{}", &USAGE_TEXT, trailer)
+}
 
-    let subcmd = std::env::args().nth(1).expect(USAGE_TEXT);
+fn reindex_classpath_main(db: &sled::Db) -> Result<()> {
+    let index_name = std::env::args()
+        .nth(3)
+        .ok_or_else(|| usage_error("Index name required."))?;
+    let classpath = std::env::args()
+        .nth(4)
+        .ok_or_else(|| usage_error("Classpath required."))?;
+    cpid::indexes::reindex_classpath(&db, &index_name, &classpath)
+}
+
+fn reindex_jardir_main(db: &sled::Db) -> Result<()> {
+    let index_name = std::env::args()
+        .nth(3)
+        .ok_or_else(|| usage_error("Index name required."))?;
+    let jar_source = std::env::args()
+        .nth(4)
+        .ok_or_else(|| usage_error("Jar dir required."))?;
+    let jar_source_path = Path::new(&jar_source);
+    if jar_source_path.is_dir() {
+        cpid::indexes::reindex_jar_dir(&db, &index_name, jar_source_path)
+    } else {
+        Err(anyhow!("{jar_source} is not a directory."))
+    }
+}
+
+fn reindex_jimage_main(db: &sled::Db) -> Result<()> {
+    let index_name = std::env::args()
+        .nth(3)
+        .ok_or_else(|| usage_error("Index name required."))?;
+    let jar_source = std::env::args()
+        .nth(4)
+        .ok_or_else(|| usage_error("jimage file path required."))?;
+    let jar_source_path = Path::new(&jar_source);
+    if jar_source_path.is_file() && is_jimage_file(&jar_source) {
+        cpid::indexes::reindex_jimage(&db, &index_name, jar_source_path)
+    } else {
+        Err(anyhow!("{jar_source} is not a jimage file."))
+    }
+}
+
+fn reindex_project_main(db: &sled::Db) -> Result<()> {
+    let index_name = std::env::args()
+        .nth(3)
+        .ok_or_else(|| usage_error("Index name required."))?;
+    let path_arg = std::env::args()
+        .nth(4)
+        .ok_or_else(|| usage_error("Project path required."))?;
+    let proj_path = Path::new(&path_arg);
+    if proj_path.is_dir() {
+        cpid::indexes::reindex_project_path(&db, &index_name, &proj_path)
+    } else {
+        Err(Error::msg("Project path must be a directory."))
+    }
+}
+
+fn reindex_main(db: &sled::Db) -> Result<()> {
+    let subcmd = std::env::args()
+        .nth(2)
+        .ok_or_else(|| usage_error("Incomplete command line"))?;
+    match subcmd.as_str() {
+        "classpath" => reindex_classpath_main(db),
+        "jardir" => reindex_jardir_main(db),
+        "jimage" => reindex_jimage_main(db),
+        "project" => reindex_project_main(db),
+        _ => Err(usage_error("Unknown reindex sub-command.")),
+    }
+}
+
+fn main() -> Result<()> {
+    let subcmd = std::env::args()
+        .nth(1)
+        .ok_or_else(|| usage_error("Incomplete command line."))?;
     let db = create_or_open_db()?;
     let subcmd_result = match subcmd.as_str() {
         "clsquery" => {
@@ -123,23 +197,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        "reindex" => {
-            let index_name = std::env::args()
-                .nth(2)
-                .ok_or_else(|| usage_error("Index name required."))?;
-            let jar_source = std::env::args()
-                .nth(3)
-                .ok_or_else(|| usage_error("Class name required."))?;
-            let jar_source_path = Path::new(&jar_source);
-            if jar_source_path.is_dir() {
-                cpid::indexes::reindex_jar_dir(&db, &index_name, jar_source_path)
-            } else if jar_source_path.is_file() && is_jimage_file(&jar_source) {
-                let results = cpid::indexes::reindex_jimage(&db, &index_name, jar_source_path)?;
-                Ok(())
-            } else {
-                cpid::indexes::reindex_classpath(&db, &index_name, &jar_source)
-            }
-        }
+        "reindex" => reindex_main(&db),
         "serve" => {
             let default_path = default_socket_path()?;
             let path = std::env::args().nth(2).or(Some(default_path)).unwrap();
@@ -150,9 +208,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        _ => {
-            bail!(&USAGE_TEXT);
-        }
+        _ => Err(usage_error("Unknown sub-command")),
     };
     drop(db);
     subcmd_result

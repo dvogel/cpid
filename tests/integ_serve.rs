@@ -16,8 +16,8 @@ extern crate sled;
 fn start_serve() -> std::thread::JoinHandle<()> {
     thread::spawn(move || {
         let db = sled::open("test.sled").expect("writable database file.");
-        cpid::serve::serve_unix(&db, String::from("test.socket"));
-        std::fs::remove_file("test.socket");
+        cpid::serve::serve_unix(&db, String::from("/tmp/test.socket"));
+        std::fs::remove_file("/tmp/test.socket");
     })
 }
 
@@ -50,7 +50,7 @@ fn read_reply(src: &mut dyn Read, buf: &mut String) {
 fn enumerate_sample_project_classpath() -> Result<()> {
     let serve_thread = start_serve();
     std::thread::sleep(Duration::from_millis(1000));
-    let mut client_socket = match UnixStream::connect("test.socket") {
+    let mut client_socket = match UnixStream::connect("/tmp/test.socket") {
         Ok(sock) => sock,
         Err(e) => {
             panic!("SOCKET FAILURE: {}", e);

@@ -21,5 +21,6 @@ use zip::result::ZipResult;
 
 pub mod indexes;
 pub mod jdk;
+pub mod project;
 pub mod proto;
 pub mod serve;

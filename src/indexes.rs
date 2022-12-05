@@ -134,7 +134,7 @@ pub fn index_jimage(path: &Path) -> Result<Vec<(String, String, String)>> {
     let instream = jimage_child
         .stdout
         .map(|r| BufReader::new(r))
-        .ok_or(anyhow!("Failed to read jimage process outpout."))?;
+        .ok_or(anyhow!("Failed to read jimage process output."))?;
 
     let module_header_pat = Regex::new(r"^Module: (.+)$").unwrap();
     // This intentionally omits the '$' character used to indicate inner classes.
@@ -229,6 +229,32 @@ pub fn query_package_index(
         }
     };
     Ok(results)
+}
+
+pub fn reindex_project_path(
+    db: &sled::Db,
+    index_name: &str,
+    indexed_project_path: &Path,
+) -> Result<()> {
+    let class_packages_tree = open_class_packages_tree(db, index_name);
+    let package_contents_tree = open_package_contents_tree(db, index_name);
+
+    let packages = crate::project::crawl_project(indexed_project_path).or(Err(anyhow!(
+        "Failed to crawl contents of project directory."
+    )))?;
+    let mut tuples: Vec<(String, String, String)> = Vec::new();
+    for pkg in packages {
+        if let Some(pkg_name) = pkg.name {
+            for class_name in pkg.contained_identifiers {
+                tuples.push((class_name.clone(), pkg_name.clone(), String::new()));
+            }
+        }
+    }
+    index_class_tuples(&class_packages_tree, &package_contents_tree, &tuples).or(Err(anyhow!(
+        "Failed to index contents of project directory."
+    )))?;
+
+    Ok(())
 }
 
 pub fn reindex_jar_dir(db: &sled::Db, index_name: &str, indexed_dir_path: &Path) -> Result<()> {

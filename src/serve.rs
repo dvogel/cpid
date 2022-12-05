@@ -4,6 +4,7 @@
 use std::io::{Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -20,8 +21,10 @@ fn serve_accept_loop(
     socket_path: String,
     shutdown_cond: Arc<AtomicBool>,
 ) -> Result<()> {
-    std::fs::remove_file(&socket_path)
-        .with_context(|| format!("When removing previous unix domain socket."))?;
+    if Path::new(&socket_path).exists() {
+        std::fs::remove_file(&socket_path)
+            .with_context(|| format!("When removing previous unix domain socket."))?;
+    }
 
     let listener = UnixListener::bind(&socket_path)?;
     println!("Listening on {}", socket_path);
