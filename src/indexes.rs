@@ -35,6 +35,12 @@ fn open_package_contents_tree(db: &sled::Db, index_name: &str) -> sled::Tree {
         .expect("database tree");
 }
 
+pub fn drop_index(db: &sled::Db, index_name: &str) -> Result<()> {
+    db.drop_tree(tree_name(index_name, class_packages_tree_suffix))?;
+    db.drop_tree(tree_name(index_name, package_contents_tree_suffix))?;
+    Ok(())
+}
+
 pub fn enumerate_indexes(db: &sled::Db, index_name: &str) -> Result<()> {
     let class_packages_tree = open_class_packages_tree(db, index_name);
 

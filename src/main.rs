@@ -181,6 +181,12 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string(&results)?);
             Ok(())
         }
+        "dropindex" => {
+            let index_name = std::env::args()
+                .nth(2)
+                .ok_or_else(|| usage_error("Index name required."))?;
+            cpid::indexes::drop_index(&db, &index_name)
+        }
         "enumerate" => {
             let index_name = std::env::args()
                 .nth(2)

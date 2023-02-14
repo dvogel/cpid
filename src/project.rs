@@ -115,6 +115,8 @@ fn collect_identifier(code: &String, cursor: &mut TreeCursor, accum: &mut String
         return;
     } else if cursor.node().kind() == "identifier" || cursor.node().kind() == "." {
         accum.push_str(text_for_node(code, &cursor.node()).as_str());
+    } else if cursor.node().kind() == "marker_annotation" {
+        return;
     } else {
         if accum.len() > 0 {
             // If we've seen any identifier components then the first non-identifier component
