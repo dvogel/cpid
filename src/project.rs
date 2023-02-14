@@ -102,7 +102,9 @@ fn text_for_node(code: &String, node: &Node) -> String {
 
 fn collect_identifier(code: &String, cursor: &mut TreeCursor, accum: &mut String) {
     if (cursor.node().kind() == "class_declaration"
-        || cursor.node().kind() == "package_declaration")
+        || cursor.node().kind() == "interface_declaration"
+        || cursor.node().kind() == "package_declaration"
+        || cursor.node().kind() == "enum_declaration")
         && !cursor.goto_first_child()
     {
         return;
@@ -115,6 +117,7 @@ fn collect_identifier(code: &String, cursor: &mut TreeCursor, accum: &mut String
         return;
     } else if cursor.node().kind() == "identifier" || cursor.node().kind() == "." {
         accum.push_str(text_for_node(code, &cursor.node()).as_str());
+        return;
     } else if cursor.node().kind() == "marker_annotation" {
         return;
     } else {
@@ -139,21 +142,21 @@ fn collect_from_tree(code: &String, cursor: &mut TreeCursor, accum: &mut Declare
     let node = cursor.node();
 
     if node.kind() == "package_declaration" {
-        let mut package_name: String = String::new();
-        collect_identifier(code, cursor, &mut package_name);
-        if package_name.len() == 0 {
-            eprintln!("No package name found in package_declaration");
+        let mut identifier: String = String::new();
+        collect_identifier(code, cursor, &mut identifier);
+        if identifier.len() == 0 {
+            eprintln!("No identifier found in {}", node.kind());
         } else {
-            accum.set_package_name(package_name.clone());
+            accum.set_package_name(identifier.clone());
         }
         return;
-    } else if node.kind() == "class_declaration" {
-        let mut class_name = String::new();
-        collect_identifier(code, cursor, &mut class_name);
-        if class_name.len() == 0 {
-            eprintln!("No class name found in class_declaration");
+    } else if node.kind() == "class_declaration" || node.kind() == "enum_declaration" || node.kind() == "interface_declaration" {
+        let mut identifier: String = String::new();
+        collect_identifier(code, cursor, &mut identifier);
+        if identifier.len() == 0 {
+            eprintln!("No identifier found in {}", node.kind());
         } else {
-            accum.add_class_name(class_name.clone());
+            accum.add_class_name(identifier.clone());
         }
     }
 
@@ -192,7 +195,7 @@ fn should_skip(entry: &DirEntry) -> bool {
     entry
         .file_name()
         .to_str()
-        .map(|s| s.starts_with("."))
+        .map(|s| s.starts_with(".") || s == "generated")
         .unwrap_or(false)
 }
 
