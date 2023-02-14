@@ -60,6 +60,7 @@ pub enum ClientMsg {
     PackageMultiEnumerateQuery(PackageMultiEnumerateArgs),
     ReindexPathCmd(ReindexArgs),
     ReindexClasspathCmd(ReindexArgs),
+    ReindexProjectCmd(ReindexArgs),
     ShutdownCmd,
 }
 
@@ -155,6 +156,12 @@ fn exec_package_multi_enumerate_query(
     ))
 }
 
+fn exec_reindex_project_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<ResponseMsg> {
+    let proj_path = Path::new(&msg.archive_source);
+    indexes::reindex_project_path(&db, &msg.index_name, &proj_path);
+    Ok(ResponseMsg::NullResponse)
+}
+
 fn exec_reindex_classpath_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<ResponseMsg> {
     indexes::reindex_classpath(&db, &msg.index_name, &msg.archive_source)?;
     Ok(ResponseMsg::NullResponse)
@@ -194,6 +201,7 @@ pub fn handle_client<I: Read, O: Write>(
                     }
                     ClientMsg::ReindexClasspathCmd(args) => exec_reindex_classpath_cmd(&db, args),
                     ClientMsg::ReindexPathCmd(args) => exec_reindex_path_cmd(&db, args),
+                    ClientMsg::ReindexProjectCmd(args) => exec_reindex_project_cmd(&db, args),
                     ClientMsg::ShutdownCmd => {
                         shutdown_cond.store(true, Ordering::SeqCst);
                         eprintln!("Client requested shutdown.");
