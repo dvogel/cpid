@@ -13,21 +13,11 @@ extern "C" {
     fn tree_sitter_java() -> Language;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DeclaredPackage {
     pub name: Option<String>,
     pub contained_identifiers: Vec<String>,
     pub files: Vec<String>,
-}
-
-impl Default for DeclaredPackage {
-    fn default() -> Self {
-        DeclaredPackage {
-            name: None,
-            contained_identifiers: Vec::new(),
-            files: Vec::new(),
-        }
-    }
 }
 
 impl DeclaredPackage {
@@ -91,7 +81,7 @@ fn print_tree_from_file(parser: &mut Parser, path: &Path) -> Result<()> {
 }
 
 fn text_for_node(code: &String, node: &Node) -> String {
-    match node.utf8_text(&code.as_bytes()) {
+    match node.utf8_text(code.as_bytes()) {
         Ok(t) => t.to_string(),
         Err(e) => {
             eprintln!("ERROR: {}", e);
@@ -100,6 +90,7 @@ fn text_for_node(code: &String, node: &Node) -> String {
     }
 }
 
+#[allow(clippy::if_same_then_else)]
 fn collect_identifier(code: &String, cursor: &mut TreeCursor, accum: &mut String) {
     if (cursor.node().kind() == "class_declaration"
         || cursor.node().kind() == "interface_declaration"
@@ -117,15 +108,12 @@ fn collect_identifier(code: &String, cursor: &mut TreeCursor, accum: &mut String
         return;
     } else if cursor.node().kind() == "identifier" || cursor.node().kind() == "." {
         accum.push_str(text_for_node(code, &cursor.node()).as_str());
-        return;
     } else if cursor.node().kind() == "marker_annotation" {
         return;
-    } else {
-        if accum.len() > 0 {
-            // If we've seen any identifier components then the first non-identifier component
-            // implicitly ends the identifier, regardless of the validity of the syntax.
-            return;
-        }
+    } else if !accum.is_empty() {
+        // If we've seen any identifier components then the first non-identifier component
+        // implicitly ends the identifier, regardless of the validity of the syntax.
+        return;
     }
 
     if cursor.goto_first_child() {
@@ -144,16 +132,19 @@ fn collect_from_tree(code: &String, cursor: &mut TreeCursor, accum: &mut Declare
     if node.kind() == "package_declaration" {
         let mut identifier: String = String::new();
         collect_identifier(code, cursor, &mut identifier);
-        if identifier.len() == 0 {
+        if identifier.is_empty() {
             eprintln!("No identifier found in {}", node.kind());
         } else {
             accum.set_package_name(identifier.clone());
         }
         return;
-    } else if node.kind() == "class_declaration" || node.kind() == "enum_declaration" || node.kind() == "interface_declaration" {
+    } else if node.kind() == "class_declaration"
+        || node.kind() == "enum_declaration"
+        || node.kind() == "interface_declaration"
+    {
         let mut identifier: String = String::new();
         collect_identifier(code, cursor, &mut identifier);
-        if identifier.len() == 0 {
+        if identifier.is_empty() {
             eprintln!("No identifier found in {}", node.kind());
         } else {
             accum.add_class_name(identifier.clone());
@@ -178,8 +169,8 @@ fn collect_from_file(parser: &mut Parser, path: &Path) -> Result<DeclaredPackage
 
     let mut result = DeclaredPackage::default();
     collect_from_tree(&code, &mut tree.walk(), &mut result);
-    if let Some(_) = result.name {
-        if result.contained_identifiers.len() > 0 {
+    if result.name.is_some() {
+        if !result.contained_identifiers.is_empty() {
             result.add_file_name(path.to_str().unwrap().to_string());
         }
         Ok(result)
@@ -195,7 +186,7 @@ fn should_skip(entry: &DirEntry) -> bool {
     entry
         .file_name()
         .to_str()
-        .map(|s| s.starts_with(".") || s == "generated")
+        .map(|s| s.starts_with('.') || s == "generated")
         .unwrap_or(false)
 }
 

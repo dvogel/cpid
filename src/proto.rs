@@ -102,7 +102,7 @@ pub struct ChannelMsg(u32, ClientMsg);
 pub struct ChannelResponse(u32, ResponseMsg);
 
 fn exec_class_query(db: &sled::Db, msg: ClassQueryArgs) -> Result<ResponseMsg> {
-    let results = Index::new(&db, &msg.index_name).query_class_index(&msg.class_name)?;
+    let results = Index::new(db, &msg.index_name).query_class_index(&msg.class_name)?;
     Ok(ResponseMsg::ClassQueryResponse(
         ClassQueryResponseArgs::new(results),
     ))
@@ -111,7 +111,7 @@ fn exec_class_query(db: &sled::Db, msg: ClassQueryArgs) -> Result<ResponseMsg> {
 fn exec_class_multi_query(db: &sled::Db, msg: ClassMultiQueryArgs) -> Result<ResponseMsg> {
     let mut results: HashMap<String, Vec<String>> = HashMap::new();
     for idx_name in msg.index_names {
-        let results1 = Index::new(&db, &idx_name).query_class_index(&msg.class_name)?;
+        let results1 = Index::new(db, &idx_name).query_class_index(&msg.class_name)?;
         for (rk1, rv1) in results1.into_iter() {
             let mut rv = results.get(&rk1).unwrap_or(&Vec::new()).clone();
             rv.extend(rv1);
@@ -125,7 +125,7 @@ fn exec_class_multi_query(db: &sled::Db, msg: ClassMultiQueryArgs) -> Result<Res
 }
 
 fn exec_package_enumerate_query(db: &sled::Db, msg: PackageEnumerateArgs) -> Result<ResponseMsg> {
-    let results = Index::new(&db, &msg.index_name).query_package_index(&msg.package_name)?;
+    let results = Index::new(db, &msg.index_name).query_package_index(&msg.package_name)?;
     Ok(ResponseMsg::PackageEnumerateQueryResponse(
         PackageEnumerateQueryResponseArgs::new(results),
     ))
@@ -137,7 +137,7 @@ fn exec_package_multi_enumerate_query(
 ) -> Result<ResponseMsg> {
     let mut results: HashMap<String, Vec<String>> = HashMap::new();
     for idx_name in msg.index_names {
-        let results1 = Index::new(&db, &idx_name).query_package_index(&msg.package_name)?;
+        let results1 = Index::new(db, &idx_name).query_package_index(&msg.package_name)?;
         for (rk1, rv1) in results1.into_iter() {
             let mut rv = results.get(&rk1).unwrap_or(&Vec::new()).clone();
             rv.extend(rv1);
@@ -152,12 +152,12 @@ fn exec_package_multi_enumerate_query(
 
 fn exec_reindex_project_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<ResponseMsg> {
     let proj_path = Path::new(&msg.archive_source);
-    indexes::reindex_project_path(&Index::new(&db, &msg.index_name), &proj_path)?;
+    indexes::reindex_project_path(&Index::new(db, &msg.index_name), proj_path)?;
     Ok(ResponseMsg::NullResponse)
 }
 
 fn exec_reindex_classpath_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<ResponseMsg> {
-    indexes::reindex_classpath(&Index::new(&db, &msg.index_name), &msg.archive_source)?;
+    indexes::reindex_classpath(&Index::new(db, &msg.index_name), &msg.archive_source)?;
     Ok(ResponseMsg::NullResponse)
 }
 
@@ -167,9 +167,9 @@ fn exec_reindex_path_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<ResponseMsg>
         anyhow::Error::msg("Invalid archive source path provided in protocol message.")
     })?;
     if path.is_file() && is_jimage_file(path_str) {
-        indexes::reindex_jimage(&Index::new(&db, &msg.index_name), path)?;
+        indexes::reindex_jimage(&Index::new(db, &msg.index_name), path)?;
     } else if path.is_dir() {
-        indexes::reindex_jar_dir(&Index::new(&db, &msg.index_name), path)?;
+        indexes::reindex_jar_dir(&Index::new(db, &msg.index_name), path)?;
     }
     Ok(ResponseMsg::NullResponse)
 }
@@ -179,7 +179,7 @@ pub fn handle_client<I: Read, O: Write>(
     instream: I,
     mut outstream: O,
     shutdown_cond: Arc<AtomicBool>,
-) -> () {
+) {
     let msgs = serde_json::Deserializer::from_reader(io::BufReader::new(instream));
     for msg in msgs.into_iter::<ChannelMsg>() {
         match msg {
@@ -205,13 +205,13 @@ pub fn handle_client<I: Read, O: Write>(
                 let write_result = resp_msg
                     .and_then(|m| {
                         serde_json::to_string::<ChannelResponse>(&ChannelResponse(msg1.0, m))
-                            .map_err(|e| anyhow::Error::new(e))
+                            .map_err(anyhow::Error::new)
                     })
                     .and_then(|s| {
                         outstream
                             .write_all(s.as_bytes())
                             .and_then(|_| outstream.flush())
-                            .map_err(|e| anyhow::Error::new(e))
+                            .map_err(anyhow::Error::new)
                     })
                     .map_err(|e| eprintln!("ERR: {}", e));
                 if let Err(e) = write_result {

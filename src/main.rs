@@ -23,8 +23,10 @@ use serde_derive::Serialize;
 use zip::read::ZipArchive;
 use zip::result::ZipResult;
 
-use cpid;
-use cpid::indexes::Index;
+use cpid::indexes::{
+    enumerate_indexes, reindex_classpath, reindex_jar_dir, reindex_jimage, reindex_project_path,
+    Index,
+};
 use cpid::jdk::is_jimage_file;
 use cpid::project::crawl_project;
 
@@ -93,7 +95,7 @@ fn reindex_classpath_main(db: &sled::Db) -> Result<()> {
     let classpath = std::env::args()
         .nth(4)
         .ok_or_else(|| usage_error("Classpath required."))?;
-    cpid::indexes::reindex_classpath(&Index::new(&db, &index_name), &classpath)
+    reindex_classpath(&Index::new(db, &index_name), &classpath)
 }
 
 fn reindex_jardir_main(db: &sled::Db) -> Result<()> {
@@ -105,7 +107,7 @@ fn reindex_jardir_main(db: &sled::Db) -> Result<()> {
         .ok_or_else(|| usage_error("Jar dir required."))?;
     let jar_source_path = Path::new(&jar_source);
     if jar_source_path.is_dir() {
-        cpid::indexes::reindex_jar_dir(&Index::new(&db, &index_name), jar_source_path)
+        reindex_jar_dir(&Index::new(db, &index_name), jar_source_path)
     } else {
         Err(anyhow!("{jar_source} is not a directory."))
     }
@@ -120,7 +122,7 @@ fn reindex_jimage_main(db: &sled::Db) -> Result<()> {
         .ok_or_else(|| usage_error("jimage file path required."))?;
     let jar_source_path = Path::new(&jar_source);
     if jar_source_path.is_file() && is_jimage_file(&jar_source) {
-        cpid::indexes::reindex_jimage(&Index::new(&db, &index_name), jar_source_path)
+        reindex_jimage(&Index::new(db, &index_name), jar_source_path)
     } else {
         Err(anyhow!("{jar_source} is not a jimage file."))
     }
@@ -135,7 +137,7 @@ fn reindex_project_main(db: &sled::Db) -> Result<()> {
         .ok_or_else(|| usage_error("Project path required."))?;
     let proj_path = Path::new(&path_arg);
     if proj_path.is_dir() {
-        cpid::indexes::reindex_project_path(&Index::new(&db, &index_name), &proj_path)
+        reindex_project_path(&Index::new(db, &index_name), proj_path)
     } else {
         Err(Error::msg("Project path must be a directory."))
     }
@@ -192,7 +194,7 @@ fn main() -> Result<()> {
             let index_name = std::env::args()
                 .nth(2)
                 .ok_or_else(|| usage_error("Index name required."))?;
-            cpid::indexes::enumerate_indexes(&Index::new(&db, &index_name))
+            enumerate_indexes(&Index::new(&db, &index_name))
         }
         "indexes" => {
             let index_name_pat = Regex::new(r"(.+)-class_pkgs").unwrap();
@@ -207,7 +209,7 @@ fn main() -> Result<()> {
         "reindex" => reindex_main(&db),
         "serve" => {
             let default_path = default_socket_path()?;
-            let path = std::env::args().nth(2).or(Some(default_path)).unwrap();
+            let path = std::env::args().nth(2).unwrap_or(default_path);
             if path == "-" {
                 cpid::serve::serve_stdio(&db, stdin(), stdout())
             } else {

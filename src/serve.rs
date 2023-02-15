@@ -12,7 +12,7 @@ use std::time::Duration;
 
 extern crate sled;
 
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{anyhow, bail, Context, Error, Result};
 
 use crate::proto;
 
@@ -23,7 +23,7 @@ fn serve_accept_loop(
 ) -> Result<()> {
     if Path::new(&socket_path).exists() {
         std::fs::remove_file(&socket_path)
-            .with_context(|| format!("When removing previous unix domain socket."))?;
+            .with_context(|| "When removing previous unix domain socket.".to_string())?;
     }
 
     let listener = UnixListener::bind(&socket_path)?;
@@ -39,7 +39,7 @@ fn serve_accept_loop(
                         // Ignore the shutdown errors because we're done with the stream.
                         let _ = stream.flush();
                         let _ = stream.shutdown(Shutdown::Both);
-                        return Err(Error::msg(format!("SOCKET ERROR: {}", e)));
+                        return Err(anyhow!("SOCKET ERROR: {}", e));
                     }
                 };
                 thread::spawn(move || {

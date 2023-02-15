@@ -20,13 +20,13 @@ const CLASS_PACKAGES_TREE_SUFFIX: &str = "-class_pkgs";
 const PACKAGE_CONTENTS_TREE_SUFFIX: &str = "-pkg_classes";
 
 fn tree_name(index_name: &str, suffix: &str) -> String {
-    return format!("{}{}", index_name, suffix);
+    format!("{}{}", index_name, suffix)
 }
 
 pub fn merge_string_into_list(new_entry: &str, old_bytes: Option<&[u8]>) -> Option<Vec<u8>> {
     let mut list: Vec<String> = old_bytes
         .and_then(|b| serde_json::from_slice(b).ok())
-        .unwrap_or_else(|| Vec::new());
+        .unwrap_or_default();
 
     list.push(new_entry.to_string());
     list.sort();
@@ -53,17 +53,15 @@ impl<'a> Index<'a> {
     }
 
     pub fn open_class_packages_tree(&self) -> sled::Tree {
-        return self
-            .db
+        self.db
             .open_tree(tree_name(self.index_name, CLASS_PACKAGES_TREE_SUFFIX))
-            .expect("database tree");
+            .expect("database tree")
     }
 
     pub fn open_package_contents_tree(&self) -> sled::Tree {
-        return self
-            .db
+        self.db
             .open_tree(tree_name(self.index_name, PACKAGE_CONTENTS_TREE_SUFFIX))
-            .expect("database tree");
+            .expect("database tree")
     }
 
     pub fn drop_trees(&self) -> Result<()> {
@@ -204,8 +202,8 @@ pub fn index_jimage(path: &Path) -> Result<Vec<(String, String, String)>> {
     let mut accum: Vec<(String, String, String)> = Vec::new();
     let instream = jimage_child
         .stdout
-        .map(|r| BufReader::new(r))
-        .ok_or(anyhow!("Failed to read jimage process output."))?;
+        .map(BufReader::new)
+        .ok_or_else(|| anyhow!("Failed to read jimage process output."))?;
 
     let module_header_pat = Regex::new(r"^Module: (.+)$").unwrap();
     // This intentionally omits the '$' character used to indicate inner classes.
