@@ -36,14 +36,16 @@ fn serve_accept_loop(
                 let mut write_stream = match stream.try_clone() {
                     Ok(s) => s,
                     Err(e) => {
-                        stream.flush();
-                        stream.shutdown(Shutdown::Both);
+                        // Ignore the shutdown errors because we're done with the stream.
+                        let _ = stream.flush();
+                        let _ = stream.shutdown(Shutdown::Both);
                         return Err(Error::msg(format!("SOCKET ERROR: {}", e)));
                     }
                 };
                 thread::spawn(move || {
                     proto::handle_client(db1, &mut stream, &mut write_stream, shutdown_cond1);
-                    stream.shutdown(Shutdown::Both);
+                    // Ignore the shutdown errors because we're done with the stream.
+                    let _ = stream.shutdown(Shutdown::Both);
                 });
             }
             Err(e) => {
@@ -55,7 +57,7 @@ fn serve_accept_loop(
 }
 
 pub fn serve_unix(db: &sled::Db, socket_path: String) -> Result<()> {
-    let mut shutdown_cond = Arc::new(AtomicBool::new(false));
+    let shutdown_cond = Arc::new(AtomicBool::new(false));
 
     // The thread below will call accept() for us. Since that will block and is reentrant the we
     // cannot rely on it being interrupted. Therefore we will wait for the signal here and remove
@@ -77,10 +79,12 @@ pub fn serve_stdio<I: Read, O: Write>(
     mut instream: I,
     mut outstream: O,
 ) -> Result<()> {
-    let mut shutdown_cond = Arc::new(AtomicBool::new(false));
+    let shutdown_cond = Arc::new(AtomicBool::new(false));
     let db1 = db.clone();
     proto::handle_client(db1, &mut instream, &mut outstream, shutdown_cond);
-    outstream.flush();
-    db.flush();
+    // Ignore the database flush because our only recourse seems to be to die, cutting off other
+    // clients too.
+    let _ = outstream.flush();
+    let _ = db.flush();
     Ok(())
 }

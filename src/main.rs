@@ -24,6 +24,7 @@ use zip::read::ZipArchive;
 use zip::result::ZipResult;
 
 use cpid;
+use cpid::indexes::Index;
 use cpid::jdk::is_jimage_file;
 use cpid::project::crawl_project;
 
@@ -92,7 +93,7 @@ fn reindex_classpath_main(db: &sled::Db) -> Result<()> {
     let classpath = std::env::args()
         .nth(4)
         .ok_or_else(|| usage_error("Classpath required."))?;
-    cpid::indexes::reindex_classpath(&db, &index_name, &classpath)
+    cpid::indexes::reindex_classpath(&Index::new(&db, &index_name), &classpath)
 }
 
 fn reindex_jardir_main(db: &sled::Db) -> Result<()> {
@@ -104,7 +105,7 @@ fn reindex_jardir_main(db: &sled::Db) -> Result<()> {
         .ok_or_else(|| usage_error("Jar dir required."))?;
     let jar_source_path = Path::new(&jar_source);
     if jar_source_path.is_dir() {
-        cpid::indexes::reindex_jar_dir(&db, &index_name, jar_source_path)
+        cpid::indexes::reindex_jar_dir(&Index::new(&db, &index_name), jar_source_path)
     } else {
         Err(anyhow!("{jar_source} is not a directory."))
     }
@@ -119,7 +120,7 @@ fn reindex_jimage_main(db: &sled::Db) -> Result<()> {
         .ok_or_else(|| usage_error("jimage file path required."))?;
     let jar_source_path = Path::new(&jar_source);
     if jar_source_path.is_file() && is_jimage_file(&jar_source) {
-        cpid::indexes::reindex_jimage(&db, &index_name, jar_source_path)
+        cpid::indexes::reindex_jimage(&Index::new(&db, &index_name), jar_source_path)
     } else {
         Err(anyhow!("{jar_source} is not a jimage file."))
     }
@@ -134,7 +135,7 @@ fn reindex_project_main(db: &sled::Db) -> Result<()> {
         .ok_or_else(|| usage_error("Project path required."))?;
     let proj_path = Path::new(&path_arg);
     if proj_path.is_dir() {
-        cpid::indexes::reindex_project_path(&db, &index_name, &proj_path)
+        cpid::indexes::reindex_project_path(&Index::new(&db, &index_name), &proj_path)
     } else {
         Err(Error::msg("Project path must be a directory."))
     }
@@ -166,7 +167,7 @@ fn main() -> Result<()> {
             let class_name = std::env::args()
                 .nth(3)
                 .ok_or_else(|| usage_error("Class name required."))?;
-            let results = cpid::indexes::query_class_index(&db, &index_name, &class_name)?;
+            let results = Index::new(&db, &index_name).query_class_index(&class_name)?;
             println!("{}", serde_json::to_string(&results)?);
             Ok(())
         }
@@ -177,7 +178,7 @@ fn main() -> Result<()> {
             let pkg_name = std::env::args()
                 .nth(3)
                 .ok_or_else(|| usage_error("Package name required."))?;
-            let results = cpid::indexes::query_package_index(&db, &index_name, &pkg_name)?;
+            let results = Index::new(&db, &index_name).query_package_index(&pkg_name)?;
             println!("{}", serde_json::to_string(&results)?);
             Ok(())
         }
@@ -185,13 +186,13 @@ fn main() -> Result<()> {
             let index_name = std::env::args()
                 .nth(2)
                 .ok_or_else(|| usage_error("Index name required."))?;
-            cpid::indexes::drop_index(&db, &index_name)
+            Index::new(&db, &index_name).drop_trees()
         }
         "enumerate" => {
             let index_name = std::env::args()
                 .nth(2)
                 .ok_or_else(|| usage_error("Index name required."))?;
-            cpid::indexes::enumerate_indexes(&db, &index_name)
+            cpid::indexes::enumerate_indexes(&Index::new(&db, &index_name))
         }
         "indexes" => {
             let index_name_pat = Regex::new(r"(.+)-class_pkgs").unwrap();
@@ -208,11 +209,10 @@ fn main() -> Result<()> {
             let default_path = default_socket_path()?;
             let path = std::env::args().nth(2).or(Some(default_path)).unwrap();
             if path == "-" {
-                cpid::serve::serve_stdio(&db, stdin(), stdout());
+                cpid::serve::serve_stdio(&db, stdin(), stdout())
             } else {
-                cpid::serve::serve_unix(&db, path);
+                cpid::serve::serve_unix(&db, path)
             }
-            Ok(())
         }
         _ => Err(usage_error("Unknown sub-command")),
     };

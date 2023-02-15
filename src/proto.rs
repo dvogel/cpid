@@ -19,6 +19,7 @@ extern crate serde_json;
 extern crate sled;
 
 use crate::indexes;
+use crate::indexes::Index;
 use crate::jdk::is_jimage_file;
 
 #[derive(Debug, PartialEq, serde_derive::Deserialize)]
@@ -100,15 +101,8 @@ pub struct ChannelMsg(u32, ClientMsg);
 #[derive(Debug, PartialEq, serde_derive::Serialize)]
 pub struct ChannelResponse(u32, ResponseMsg);
 
-fn fmt_exec_result<T, E: Display>(res: Result<T, E>) -> String {
-    match res {
-        Ok(_) => "OK".to_string(),
-        Err(e) => format!("ERR: {}", e.to_string()),
-    }
-}
-
 fn exec_class_query(db: &sled::Db, msg: ClassQueryArgs) -> Result<ResponseMsg> {
-    let results = indexes::query_class_index(&db, &msg.index_name, &msg.class_name)?;
+    let results = Index::new(&db, &msg.index_name).query_class_index(&msg.class_name)?;
     Ok(ResponseMsg::ClassQueryResponse(
         ClassQueryResponseArgs::new(results),
     ))
@@ -117,7 +111,7 @@ fn exec_class_query(db: &sled::Db, msg: ClassQueryArgs) -> Result<ResponseMsg> {
 fn exec_class_multi_query(db: &sled::Db, msg: ClassMultiQueryArgs) -> Result<ResponseMsg> {
     let mut results: HashMap<String, Vec<String>> = HashMap::new();
     for idx_name in msg.index_names {
-        let results1 = indexes::query_class_index(&db, &idx_name, &msg.class_name)?;
+        let results1 = Index::new(&db, &idx_name).query_class_index(&msg.class_name)?;
         for (rk1, rv1) in results1.into_iter() {
             let mut rv = results.get(&rk1).unwrap_or(&Vec::new()).clone();
             rv.extend(rv1);
@@ -131,7 +125,7 @@ fn exec_class_multi_query(db: &sled::Db, msg: ClassMultiQueryArgs) -> Result<Res
 }
 
 fn exec_package_enumerate_query(db: &sled::Db, msg: PackageEnumerateArgs) -> Result<ResponseMsg> {
-    let results = indexes::query_package_index(&db, &msg.index_name, &msg.package_name)?;
+    let results = Index::new(&db, &msg.index_name).query_package_index(&msg.package_name)?;
     Ok(ResponseMsg::PackageEnumerateQueryResponse(
         PackageEnumerateQueryResponseArgs::new(results),
     ))
@@ -143,7 +137,7 @@ fn exec_package_multi_enumerate_query(
 ) -> Result<ResponseMsg> {
     let mut results: HashMap<String, Vec<String>> = HashMap::new();
     for idx_name in msg.index_names {
-        let results1 = indexes::query_package_index(&db, &idx_name, &msg.package_name)?;
+        let results1 = Index::new(&db, &idx_name).query_package_index(&msg.package_name)?;
         for (rk1, rv1) in results1.into_iter() {
             let mut rv = results.get(&rk1).unwrap_or(&Vec::new()).clone();
             rv.extend(rv1);
@@ -158,24 +152,24 @@ fn exec_package_multi_enumerate_query(
 
 fn exec_reindex_project_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<ResponseMsg> {
     let proj_path = Path::new(&msg.archive_source);
-    indexes::reindex_project_path(&db, &msg.index_name, &proj_path);
+    indexes::reindex_project_path(&Index::new(&db, &msg.index_name), &proj_path)?;
     Ok(ResponseMsg::NullResponse)
 }
 
 fn exec_reindex_classpath_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<ResponseMsg> {
-    indexes::reindex_classpath(&db, &msg.index_name, &msg.archive_source)?;
+    indexes::reindex_classpath(&Index::new(&db, &msg.index_name), &msg.archive_source)?;
     Ok(ResponseMsg::NullResponse)
 }
 
 fn exec_reindex_path_cmd(db: &sled::Db, msg: ReindexArgs) -> Result<ResponseMsg> {
     let path = Path::new(&msg.archive_source);
-    let pathStr = path.to_str().ok_or_else(|| {
+    let path_str = path.to_str().ok_or_else(|| {
         anyhow::Error::msg("Invalid archive source path provided in protocol message.")
     })?;
-    if path.is_file() && is_jimage_file(pathStr) {
-        indexes::reindex_jimage(&db, &msg.index_name, path)?;
+    if path.is_file() && is_jimage_file(path_str) {
+        indexes::reindex_jimage(&Index::new(&db, &msg.index_name), path)?;
     } else if path.is_dir() {
-        indexes::reindex_jar_dir(&db, &msg.index_name, path)?;
+        indexes::reindex_jar_dir(&Index::new(&db, &msg.index_name), path)?;
     }
     Ok(ResponseMsg::NullResponse)
 }
@@ -207,7 +201,6 @@ pub fn handle_client<I: Read, O: Write>(
                         eprintln!("Client requested shutdown.");
                         break;
                     }
-                    _ => Err(Error::msg("Unrecognized message type.")),
                 };
                 let write_result = resp_msg
                     .and_then(|m| {
@@ -232,5 +225,6 @@ pub fn handle_client<I: Read, O: Write>(
         }
     }
 
-    outstream.flush();
+    // Ignore this error because we are already done communicating with the client.
+    let _ = outstream.flush();
 }

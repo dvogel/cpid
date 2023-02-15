@@ -222,7 +222,7 @@ pub fn crawl_project(path: &Path) -> Result<Vec<DeclaredPackage>> {
         });
 
         if let Some(path) = entry_path {
-            print_tree_from_file(&mut parser, &path);
+            let _: Result<_> = print_tree_from_file(&mut parser, &path);
             if let Ok(mut pkg) = collect_from_file(&mut parser, &path) {
                 if let Some(pkg_name) = pkg.name.as_ref().cloned() {
                     if let Some(prev) = packages.get(&pkg_name) {
