@@ -1,0 +1,13 @@
+= `cpid`
+
+This application is meant to be used with https://github.com/dvogel/vim-cpid[vim-cpid]. It runs in the background and:
+
+* Accepts requests to index java type names.
+** from JARs on a classpath.
+** from JARs in a directory.
+** from a JDK JImage file.
+* Answers queries regarding packages containing a given type name.
+* Answers queries to enumerate the type names found in a given package. 
+
+The wire protocol is that of vim's channel wrapper. That is, each message is a JSON array with a message sequence number followed by a payload value. See `:h channel-open` for more info.
+
