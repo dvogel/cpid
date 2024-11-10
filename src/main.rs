@@ -17,12 +17,14 @@ extern crate serde_json;
 extern crate sled;
 
 use anyhow::{anyhow, bail, Context, Error, Result};
+use clap::Parser;
 use regex::Regex;
 // use serde::{Deserialize, Serialize};
 use serde_derive::Serialize;
 use zip::read::ZipArchive;
 use zip::result::ZipResult;
 
+use cpid::cli;
 use cpid::indexes::{
     enumerate_indexes, reindex_classpath, reindex_jar_dir, reindex_jimage, reindex_project_path,
     Index,
@@ -70,133 +72,68 @@ fn default_socket_path() -> Result<String> {
     Ok(String::from(usable_db_path))
 }
 
-fn usage_error(trailer: &str) -> anyhow::Error {
-    const USAGE_TEXT: &str = r#"
-        USAGE: cpid <reindex|enumerate|serve> ...
-
-        cpid clsquery <index_name> <class_name>
-        cpid pkgenum <index_name> <package_name>
-        cpid reindex classpath <classpath_expr>
-        cpid reindex jardir <index_name> <jardir>
-        cpid reindex jimage <index_name> <image_path>
-        cpid reindex project <index_name> <srcdir>
-        cpid indexes
-        cpid enumerate <index_name> [pattern]
-        cpid serve [/socket/path]
-        "#;
-
-    anyhow!("{}\n{}", &USAGE_TEXT, trailer)
-}
-
-fn reindex_classpath_main(db: &sled::Db) -> Result<()> {
-    let index_name = std::env::args()
-        .nth(3)
-        .ok_or_else(|| usage_error("Index name required."))?;
-    let classpath = std::env::args()
-        .nth(4)
-        .ok_or_else(|| usage_error("Classpath required."))?;
-    reindex_classpath(&Index::new(db, &index_name), &classpath)
-}
-
-fn reindex_jardir_main(db: &sled::Db) -> Result<()> {
-    let index_name = std::env::args()
-        .nth(3)
-        .ok_or_else(|| usage_error("Index name required."))?;
-    let jar_source = std::env::args()
-        .nth(4)
-        .ok_or_else(|| usage_error("Jar dir required."))?;
-    let jar_source_path = Path::new(&jar_source);
-    if jar_source_path.is_dir() {
-        reindex_jar_dir(&Index::new(db, &index_name), jar_source_path)
-    } else {
-        Err(anyhow!("{jar_source} is not a directory."))
-    }
-}
-
-fn reindex_jimage_main(db: &sled::Db) -> Result<()> {
-    let index_name = std::env::args()
-        .nth(3)
-        .ok_or_else(|| usage_error("Index name required."))?;
-    let jar_source = std::env::args()
-        .nth(4)
-        .ok_or_else(|| usage_error("jimage file path required."))?;
-    let jar_source_path = Path::new(&jar_source);
-    if jar_source_path.is_file() && is_jimage_file(&jar_source) {
-        reindex_jimage(&Index::new(db, &index_name), jar_source_path)
-    } else {
-        Err(anyhow!("{jar_source} is not a jimage file."))
-    }
-}
-
-fn reindex_project_main(db: &sled::Db) -> Result<()> {
-    let index_name = std::env::args()
-        .nth(3)
-        .ok_or_else(|| usage_error("Index name required."))?;
-    let path_arg = std::env::args()
-        .nth(4)
-        .ok_or_else(|| usage_error("Project path required."))?;
-    let proj_path = Path::new(&path_arg);
-    if proj_path.is_dir() {
-        reindex_project_path(&Index::new(db, &index_name), proj_path)
-    } else {
-        Err(Error::msg("Project path must be a directory."))
-    }
-}
-
-fn reindex_main(db: &sled::Db) -> Result<()> {
-    let subcmd = std::env::args()
-        .nth(2)
-        .ok_or_else(|| usage_error("Incomplete command line"))?;
-    match subcmd.as_str() {
-        "classpath" => reindex_classpath_main(db),
-        "jardir" => reindex_jardir_main(db),
-        "jimage" => reindex_jimage_main(db),
-        "project" => reindex_project_main(db),
-        _ => Err(usage_error("Unknown reindex sub-command.")),
-    }
-}
-
 fn main() -> Result<()> {
-    let subcmd = std::env::args()
-        .nth(1)
-        .ok_or_else(|| usage_error("Incomplete command line."))?;
+    let args = cli::CmdLineArgs::parse();
     let db = create_or_open_db()?;
-    let subcmd_result = match subcmd.as_str() {
-        "clsquery" => {
-            let index_name = std::env::args()
-                .nth(2)
-                .ok_or_else(|| usage_error("Index name required."))?;
-            let class_name = std::env::args()
-                .nth(3)
-                .ok_or_else(|| usage_error("Class name required."))?;
+
+    let subcmd_result = match args.command {
+        cli::Commands::ClsQuery {
+            index_name,
+            class_name,
+        } => {
             let results = Index::new(&db, &index_name).query_class_index(&class_name)?;
             println!("{}", serde_json::to_string(&results)?);
             Ok(())
         }
-        "pkgenum" => {
-            let index_name = std::env::args()
-                .nth(2)
-                .ok_or_else(|| usage_error("Index name required."))?;
-            let pkg_name = std::env::args()
-                .nth(3)
-                .ok_or_else(|| usage_error("Package name required."))?;
-            let results = Index::new(&db, &index_name).query_package_index(&pkg_name)?;
+        cli::Commands::PkgEnum {
+            index_name,
+            package_name,
+        } => {
+            let results = Index::new(&db, &index_name).query_package_index(&package_name)?;
             println!("{}", serde_json::to_string(&results)?);
             Ok(())
         }
-        "dropindex" => {
-            let index_name = std::env::args()
-                .nth(2)
-                .ok_or_else(|| usage_error("Index name required."))?;
-            Index::new(&db, &index_name).drop_trees()
-        }
-        "enumerate" => {
-            let index_name = std::env::args()
-                .nth(2)
-                .ok_or_else(|| usage_error("Index name required."))?;
-            enumerate_indexes(&Index::new(&db, &index_name))
-        }
-        "indexes" => {
+        cli::Commands::DropIndex { index_name } => Index::new(&db, &index_name).drop_trees(),
+        cli::Commands::Reindex { reindex_command } => match reindex_command {
+            cli::ReindexCommands::Classpath {
+                index_name,
+                classpath_expr,
+            } => reindex_classpath(&Index::new(&db, &index_name), &classpath_expr),
+            cli::ReindexCommands::JarDir {
+                index_name,
+                jar_dir,
+            } => {
+                let jar_source_path = Path::new(&jar_dir);
+                if jar_source_path.is_dir() {
+                    reindex_jar_dir(&Index::new(&db, &index_name), jar_source_path)
+                } else {
+                    Err(anyhow!("{jar_dir} is not a directory."))
+                }
+            }
+            cli::ReindexCommands::JImage {
+                index_name,
+                image_file,
+            } => {
+                let image_path = Path::new(&image_file);
+                if image_path.is_file() && is_jimage_file(&image_file) {
+                    reindex_jimage(&Index::new(&db, &index_name), image_path)
+                } else {
+                    Err(anyhow!("{image_file} is not a jimage file."))
+                }
+            }
+            cli::ReindexCommands::Project {
+                index_name,
+                src_dir,
+            } => {
+                let proj_path = Path::new(&src_dir);
+                if proj_path.is_dir() {
+                    reindex_project_path(&Index::new(&db, &index_name), proj_path)
+                } else {
+                    Err(Error::msg("Project path must be a directory."))
+                }
+            }
+        },
+        cli::Commands::Indexes => {
             let index_name_pat = Regex::new(r"(.+)-class_pkgs").unwrap();
             for name_bytes in db.tree_names() {
                 let name = String::from_utf8_lossy(name_bytes.as_ref());
@@ -206,18 +143,18 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        "reindex" => reindex_main(&db),
-        "serve" => {
+        cli::Commands::Enumerate { index_name } => enumerate_indexes(&Index::new(&db, &index_name)),
+        cli::Commands::Serve { socket_path } => {
             let default_path = default_socket_path()?;
-            let path = std::env::args().nth(2).unwrap_or(default_path);
+            let path = socket_path.unwrap_or(default_path);
             if path == "-" {
                 cpid::serve::serve_stdio(&db, stdin(), stdout())
             } else {
                 cpid::serve::serve_unix(&db, path)
             }
         }
-        _ => Err(usage_error("Unknown sub-command")),
     };
+
     drop(db);
     subcmd_result
 }

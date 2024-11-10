@@ -11,6 +11,7 @@ cc = "*"
 
 [dependencies]
 anyhow = "1.0.60"
+clap = { version = "^4.5.3", features = ["derive"] }
 regex = "1.6.0"
 serde = "1.0.143"
 serde_derive = "1.0.143"

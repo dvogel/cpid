@@ -19,6 +19,7 @@ use serde_derive::Serialize;
 use zip::read::ZipArchive;
 use zip::result::ZipResult;
 
+pub mod cli;
 pub mod indexes;
 pub mod jdk;
 pub mod project;
